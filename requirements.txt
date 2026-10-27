@@ -1,0 +1,4 @@
+# Dashboard charts embedded in Tkinter via FigureCanvasTkAgg
+matplotlib>=3.7,<4
+# Cross-platform single-instance lock for the data folder (fcntl on Unix, msvcrt on Windows)
+filelock>=3.12,<5

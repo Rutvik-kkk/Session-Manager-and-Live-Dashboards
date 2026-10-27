@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+.venv/
+venv/
+# Live café data stays on the machine that runs the app.
+data/
