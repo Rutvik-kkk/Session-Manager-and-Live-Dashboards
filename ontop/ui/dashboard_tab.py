@@ -33,6 +33,7 @@ from ..analytics import (  # noqa: E402
     bucket_label,
     device_stats,
     filter_sessions,
+    passes_sold,
     preset_range,
     received_by_method,
     sort_device_stats,
@@ -115,6 +116,12 @@ CARD_SPECS = [
     ("balance", "Outstanding balance", "Total charges minus amount received for the selected sessions."),
     ("avg_duration", "Average session duration", None),
     ("avg_charge", "Average charge per session", None),
+    ("pass_sales", "Monthly pass sales",
+     "Price of monthly passes bought in the selected date range (by purchase date). The payment-method and "
+     "customer-name filters also apply; device and payment-status filters do not, because a pass is not tied "
+     "to a console. Not included in session charges or amount received."),
+    ("pass_hours", "Pass hours used",
+     "Time deducted from monthly passes by the selected sessions (billed in 30-minute blocks)."),
 ]
 
 
@@ -225,7 +232,7 @@ class DashboardTab(ttk.Frame):
         ttk.Label(top, text="Click a column heading to sort; double-click a row to edit.",
                   style="CardSmall.TLabel").pack(side="left", padx=10, pady=(3, 0))
         base = {c.key: c for c in session_columns()}
-        cols = [base[k] for k in ("customer", "device", "start", "duration", "total")]
+        cols = [base[k] for k in ("customer", "device", "players", "start", "duration", "total")]
         cols.append(dataclasses.replace(base["paid"], heading="Amount received"))
         cols += [base["balance"], dataclasses.replace(base["method"], heading="Payment method"),
                  dataclasses.replace(base["status"], heading="Payment status")]
@@ -291,11 +298,11 @@ class DashboardTab(ttk.Frame):
                      width=11).pack(side="left")
 
     def _layout_cards(self, event):
-        cols = 4 if event.width >= 1100 else 2 if event.width >= 560 else 1
+        cols = 5 if event.width >= 1200 else 2 if event.width >= 560 else 1
         if cols == self._card_cols:
             return
         self._card_cols = cols
-        for c in range(4):
+        for c in range(5):
             self.cards_frame.columnconfigure(c, weight=1 if c < cols else 0, uniform="cards" if c < cols else "")
         for i, (key, _t, _tip) in enumerate(CARD_SPECS):
             outer = self.cards[key][0]
@@ -435,6 +442,13 @@ class DashboardTab(ttk.Frame):
             f"{sum(1 for r in self.rows if r.balance_paise > 0)} session(s) with a balance")
         put("avg_duration", fmt_duration(round(s.average_minutes)) if s.count else "—", "per session")
         put("avg_charge", fmt_money(s.average_charge_paise) if s.count else "—", "per session")
+        flt = self.applied
+        start, end = self._range
+        sold = passes_sold(self.app.store.passes, start, end,
+                           flt.method if flt.method in PAYMENT_METHODS else None, flt.search)
+        put("pass_sales", fmt_money(sum(p.price_paise for p in sold)),
+            f"{len(sold)} pass{'es' if len(sold) != 1 else ''} bought in range")
+        put("pass_hours", fmt_hours(s.pass_minutes), f"{s.pass_sessions} pass session(s)")
 
     # ------------------------------------------------------------------
     # Charts

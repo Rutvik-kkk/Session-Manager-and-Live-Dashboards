@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 import tkinter as tk
-from datetime import date, time, timedelta
+from datetime import date, timedelta
 from tkinter import ttk
 from typing import TYPE_CHECKING
 
-from ..analytics import bar_span, day_bounds, sessions_on_day
+from ..analytics import bar_span, hour_moment, sessions_on_day, timeline_hours
 from ..formatting import (
     fmt_date,
     fmt_date_long,
@@ -15,11 +15,10 @@ from ..formatting import (
     fmt_datetime_long,
     fmt_duration,
     fmt_money,
-    local_datetime,
     now_local,
     to_local,
 )
-from ..models import DEVICES, PAYMENT_STATUSES, Session
+from ..models import DEVICES, PAYMENT_STATUSES, Session, fmt_phone
 from . import theme
 from .widgets import DateEntry
 
@@ -76,6 +75,14 @@ class SessionDetailsDialog(tk.Toplevel):
         grid.pack(fill="x", pady=(14, 0))
         rows = [
             ("Device", session.device),
+            ("Players", str(session.players)),
+        ]
+        p = app.store.get_pass(session.pass_id)
+        if p:
+            left = p.included_minutes - app.store.pass_used_minutes(p.id)
+            rows.append(("Monthly pass", f"{fmt_phone(p.phone)} · {fmt_duration(session.pass_minutes)} used here · "
+                                         f"{fmt_duration(max(left, 0))} left"))
+        rows += [
             ("Start", fmt_datetime_long(session.start)),
             ("End", fmt_datetime_long(session.end)),
             ("Duration", fmt_duration(session.duration_minutes)),
@@ -181,8 +188,8 @@ class SessionMappingTab(ttk.Frame):
         self.canvas.bind("<Shift-Button-5>", lambda e: self.canvas.xview_scroll(3, "units"))
 
         ttk.Label(self, style="Muted.TLabel",
-                  text="Bars are placed by their saved start and end times and clipped to this day; "
-                       "‹ or › marks a session that continues from the previous day or into the next day. "
+                  text="Shows opening hours (widened if an older session falls outside them). ★ = monthly pass, "
+                       "2P–4P = number of players, ‹ or › = continues from the previous day or into the next day. "
                        "Click a bar for details.").pack(fill="x", pady=(8, 0))
 
     # -- navigation ------------------------------------------------------
@@ -211,7 +218,10 @@ class SessionMappingTab(ttk.Frame):
     def _tick(self):
         if self.selected_date == now_local().date():
             self._schedule_redraw()
-        self.after(30_000, self._tick)
+        self._tick_job = self.after(30_000, self._tick)
+
+    def stop_timer(self):
+        self.after_cancel(self._tick_job)
 
     def _schedule_redraw(self):
         if not self._redraw_pending:
@@ -233,21 +243,24 @@ class SessionMappingTab(ttk.Frame):
         c, lc = self.canvas, self.labels
         c.delete("all")
         lc.delete("all")
+        sessions = self.day_sessions()
+        first_hour, last_hour = timeline_hours(self.selected_date, sessions)
+        hours = last_hour - first_hour
         view_w = max(c.winfo_width(), 200)
         view_h = max(c.winfo_height(), 200)
-        width = max(view_w, MARGIN * 2 + 24 * MIN_HOUR_W)
+        width = max(view_w, MARGIN * 2 + hours * MIN_HOUR_W)
         devices = self.visible_devices()
         lane_h = max(MIN_LANE_H, min(MAX_LANE_H, (view_h - HEADER_H - 12) // len(devices)))
         height = HEADER_H + lane_h * len(devices) + 12
         span_w = width - 2 * MARGIN
-        day_start, day_end = day_bounds(self.selected_date)
+        day_start = hour_moment(self.selected_date, first_hour)
+        day_end = hour_moment(self.selected_date, last_hour)
         day_seconds = (day_end - day_start).total_seconds()
 
         def x_at(dt) -> float:
             return MARGIN + (dt - day_start).total_seconds() / day_seconds * span_w
 
         small, bold = theme.FONTS["small"], theme.FONTS["small_bold"]
-        sessions = self.day_sessions()
 
         lc.create_text(14, HEADER_H / 2, text="Device", anchor="w", fill=theme.MUTED, font=small)
         for i, dev in enumerate(devices):
@@ -262,16 +275,16 @@ class SessionMappingTab(ttk.Frame):
                            anchor="w", fill=theme.MUTED, font=small)
         lc.create_line(LABEL_W - 1, 0, LABEL_W - 1, height, fill=theme.BORDER)
 
-        label_every = 1 if span_w / 24 >= 46 else 2
-        for hour in range(25):
-            moment = day_end if hour == 24 else local_datetime(self.selected_date, time(hour, 0))
+        label_every = 1 if span_w / hours >= 46 else 2
+        for hour in range(first_hour, last_hour + 1):
+            moment = hour_moment(self.selected_date, hour)
             x = x_at(moment)
             c.create_line(x, HEADER_H - 6, x, height - 12, fill=theme.BORDER)
-            if hour < 24:
+            if hour < last_hour:
                 half = x_at(moment + timedelta(minutes=30))
                 c.create_line(half, HEADER_H, half, height - 12, fill="#1f2838", dash=(2, 4))
-            if hour % label_every == 0:
-                anchor = "w" if hour == 0 else ("e" if hour == 24 else "center")
+            if (hour - first_hour) % label_every == 0:
+                anchor = "w" if hour == first_hour else ("e" if hour == last_hour else "center")
                 c.create_text(x, HEADER_H / 2, text=f"{hour:02d}:00", fill=theme.MUTED, font=small, anchor=anchor)
         c.create_line(0, HEADER_H, width, HEADER_H, fill=theme.BORDER)
 
@@ -297,7 +310,9 @@ class SessionMappingTab(ttk.Frame):
             start_txt = ls.strftime("%H:%M") if not starts_before else ls.strftime("%d %b %H:%M")
             end_txt = le.strftime("%H:%M") if not ends_after else le.strftime("%d %b %H:%M")
             room = x1 - x0 - 12
-            name = fit_text(bold, prefix + s.customer_name + suffix, room)
+            badges = ("★ " if s.pass_id else "") + prefix
+            players = f" · {s.players}P" if s.players > 1 else ""
+            name = fit_text(bold, badges + s.customer_name + players + suffix, room)
             times = fit_text(small, f"{start_txt}–{end_txt}", room)
             text_color = "#0b0f17"
             line_h = bold.metrics("linespace")
@@ -308,8 +323,8 @@ class SessionMappingTab(ttk.Frame):
             elif name and len(name) > 2:
                 c.create_text(x0 + 6, mid, text=name, anchor="w", fill=text_color, font=bold, tags=tags)
 
-        if self.selected_date == now_local().date():
-            now = now_local()
+        now = now_local()
+        if self.selected_date == now.date() and day_start <= now <= day_end:
             x = x_at(now)
             c.create_line(x, HEADER_H - 4, x, height - 12, fill="#f8fafc", width=2)
             c.create_rectangle(x - 26, 3, x + 26, HEADER_H - 15, fill="#f8fafc", outline="")

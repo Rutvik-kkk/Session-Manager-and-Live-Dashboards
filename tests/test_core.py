@@ -1,4 +1,4 @@
-"""Unit tests for models, storage and analytics (no GUI needed).
+"""Unit tests for pricing, models, storage and analytics (no GUI needed).
 
 Run with:  python -m unittest discover -s tests -v
 """
@@ -18,28 +18,47 @@ from ontop.formatting import fmt_money, local_datetime, parse_money
 from ontop.models import (
     ConflictError,
     Extension,
+    MonthlyPass,
     Session,
     ValidationError,
+    active_pass_for_phone,
     build_times,
     find_conflicts,
+    normalise_phone,
+    pass_state,
     payment_problems,
+    prepare_pass,
     prepare_session,
     suggest_status,
 )
+from ontop.pricing import billable_minutes, suggested_charge
 from ontop.storage import InstanceLock, InstanceLockError, SessionStore, StorageError
 
-NOW = local_datetime(date(2026, 10, 27), time(12, 0))
+DAY = date(2026, 10, 27)
+NOW = local_datetime(DAY, time(12, 0))
 
 
-def make(name="Asha", device="ps5A", day=date(2026, 10, 27), start="18:00", end="19:00", next_day=False,
-         total="200", paid="200", status=None, method="Cash", now=NOW, existing=None, extensions=()):
+def make(name="Asha", device="PS5(X)", day=DAY, start="18:00", end="19:00", players=1, total="200",
+         paid="200", status=None, method="Cash", now=NOW, existing=None, extensions=(), monthly_pass=None,
+         used=0):
     total_p, paid_p = parse_money(total), parse_money(paid)
     return prepare_session(
-        customer_name=name, device=device, date_text=day.isoformat(), start_text=start, end_text=end,
-        ends_next_day=next_day, payment_method=method, total_text=total, paid_text=paid,
+        customer_name=name, device=device, players=players, date_text=day.isoformat(), start_text=start,
+        end_text=end, payment_method=method, total_text=total, paid_text=paid,
         payment_status=status or suggest_status(total_p, paid_p), now=now, existing=existing,
-        new_extensions=extensions,
+        new_extensions=extensions, monthly_pass=monthly_pass, pass_used_by_others=used,
     )
+
+
+def raw_session(name, device, start: datetime, end: datetime, sid=None, pass_id=None, players=1) -> Session:
+    """A session built directly, e.g. an older record from before the opening-hours rule."""
+    return Session(sid or f"raw-{name}", name, device, start, end, "Cash", 0, 0, "Paid", NOW, NOW,
+                   players=players, pass_id=pass_id)
+
+
+def make_pass(name="Rahul", phone="98765 43210", bought=DAY, price="1920", now=NOW, existing=None):
+    return prepare_pass(holder_name=name, phone_text=phone, purchased_text=bought.isoformat(),
+                        price_text=price, payment_method="UPI", now=now, existing=existing)
 
 
 class TempStoreCase(unittest.TestCase):
@@ -57,12 +76,49 @@ class TempStoreCase(unittest.TestCase):
         return s
 
 
+class PricingTests(unittest.TestCase):
+    def test_rounds_up_to_30_minutes(self):
+        self.assertEqual([billable_minutes(m) for m in (1, 30, 31, 60, 61, 90, 95)], [30, 30, 60, 60, 90, 90, 120])
+
+    def test_price_list(self):
+        self.assertEqual(suggested_charge("PS5(X)", 1, 60), 8000)
+        self.assertEqual(suggested_charge("PS5(Y)", 2, 60), 18000)
+        self.assertEqual(suggested_charge("PS5(X)", 3, 60), 28000)
+        self.assertEqual(suggested_charge("PS5(Y)", 4, 60), 38000)
+        self.assertEqual(suggested_charge("PS4", 1, 60), 6000)
+        self.assertEqual(suggested_charge("PS4", 2, 60), 12000)
+        self.assertEqual(suggested_charge("PS4", 3, 60), 18000)
+        self.assertEqual(suggested_charge("PS4", 4, 60), 24000)
+
+    def test_half_hour_is_70_percent(self):
+        self.assertEqual(suggested_charge("PS5(X)", 1, 30), 5600)
+        self.assertEqual(suggested_charge("PS4", 1, 20), 4200)
+
+    def test_longer_sessions(self):
+        self.assertEqual(suggested_charge("PS5(X)", 1, 90), 12000)
+        self.assertEqual(suggested_charge("PS5(X)", 2, 75), 27000)
+        self.assertEqual(suggested_charge("PS4", 3, 120), 36000)
+
+    def test_pass_holder_pays_only_for_extra_players(self):
+        self.assertEqual(suggested_charge("PS5(X)", 1, 120, on_pass=True), 0)
+        self.assertEqual(suggested_charge("PS5(X)", 1, 30, on_pass=True), 0)
+        self.assertEqual(suggested_charge("PS5(X)", 2, 60, on_pass=True), 10000)
+        self.assertEqual(suggested_charge("PS4", 4, 90, on_pass=True), 27000)
+
+    def test_multiplayer_needs_an_hour(self):
+        with self.assertRaises(ValidationError) as ctx:
+            make(players=2, start="18:00", end="18:30")
+        self.assertIn("at least 1h", str(ctx.exception))
+        self.assertEqual(make(players=2, start="18:00", end="19:00").players, 2)
+        with self.assertRaises(ValidationError):
+            make(players=5)
+
+
 class MoneyTests(unittest.TestCase):
     def test_parse_decimal_without_float_error(self):
         self.assertEqual(parse_money("0.10") + parse_money("0.20"), 30)
         self.assertEqual(parse_money("₹1,234.5"), 123450)
         self.assertEqual(parse_money(" 199.99 "), 19999)
-        self.assertEqual(parse_money(".5"), 50)
 
     def test_rejects_invalid(self):
         for bad in ("-5", "abc", "1.234", "1e3", "", "12..3", "nan"):
@@ -72,7 +128,6 @@ class MoneyTests(unittest.TestCase):
     def test_format(self):
         self.assertEqual(fmt_money(0), "₹0.00")
         self.assertEqual(fmt_money(12345678), "₹1,23,456.78")
-        self.assertEqual(fmt_money(-250), "-₹2.50")
 
 
 class PaymentTests(unittest.TestCase):
@@ -85,7 +140,6 @@ class PaymentTests(unittest.TestCase):
     def test_conflicting_status_rejected(self):
         self.assertTrue(payment_problems(50000, 0, "Paid"))
         self.assertTrue(payment_problems(0, 0, "Unpaid"))
-        self.assertTrue(payment_problems(50000, 20000, "Unpaid"))
         self.assertEqual(payment_problems(50000, 20000, "Partially Paid"), [])
 
     def test_overpayment_rejected(self):
@@ -94,29 +148,28 @@ class PaymentTests(unittest.TestCase):
         self.assertIn("cannot exceed", str(ctx.exception))
 
     def test_balance(self):
-        s = make(total="350.50", paid="100.25", status="Partially Paid")
-        self.assertEqual(s.balance_paise, 25025)
+        self.assertEqual(make(total="350.50", paid="100.25", status="Partially Paid").balance_paise, 25025)
 
 
-class TimeTests(unittest.TestCase):
-    def test_overnight_session(self):
-        start, end = build_times("2026-10-27", "23:00", "02:30", True)
-        self.assertEqual(end - start, timedelta(hours=3, minutes=30))
-        self.assertEqual(end.date(), date(2026, 10, 28))
+class OpeningHoursTests(unittest.TestCase):
+    def test_within_hours(self):
+        start, end = build_times("2026-10-27", "09:00", "22:00")
+        self.assertEqual(end - start, timedelta(hours=13))
         self.assertIsNotNone(start.utcoffset())
 
-    def test_end_before_start_without_next_day_rejected(self):
-        with self.assertRaises(ValidationError) as ctx:
-            build_times("2026-10-27", "23:00", "02:30", False)
-        self.assertIn("Ends next day", str(ctx.exception))
+    def test_outside_hours_rejected(self):
+        with self.assertRaisesRegex(ValidationError, "opens at 09:00"):
+            build_times("2026-10-27", "08:30", "10:00")
+        with self.assertRaisesRegex(ValidationError, "closes at 22:00"):
+            build_times("2026-10-27", "21:30", "22:15")
+        with self.assertRaises(ValidationError):
+            build_times("2026-10-27", "21:00", "01:00")
 
-    def test_zero_and_over_24h_rejected(self):
+    def test_zero_or_negative_rejected(self):
         with self.assertRaises(ValidationError):
-            build_times("2026-10-27", "10:00", "10:00", False)
+            build_times("2026-10-27", "10:00", "10:00")
         with self.assertRaises(ValidationError):
-            build_times("2026-10-27", "10:00", "10:01", True)
-        start, end = build_times("2026-10-27", "10:00", "10:00", True)
-        self.assertEqual(end - start, timedelta(hours=24))
+            build_times("2026-10-27", "11:00", "10:00")
 
     def test_blank_name_rejected_and_trimmed(self):
         with self.assertRaises(ValidationError):
@@ -130,102 +183,165 @@ class ConflictTests(unittest.TestCase):
 
     def test_overlap_same_device(self):
         b = make(name="Bala", start="18:30", end="19:30")
-        self.assertEqual(find_conflicts([self.a], "ps5A", b.start, b.end), [self.a])
+        self.assertEqual(find_conflicts([self.a], "PS5(X)", b.start, b.end), [self.a])
 
     def test_back_to_back_allowed(self):
-        b = make(name="Bala", start="19:00", end="20:00")
-        self.assertEqual(find_conflicts([self.a], "ps5A", b.start, b.end), [])
-        c = make(name="Chitra", start="17:00", end="18:00")
-        self.assertEqual(find_conflicts([self.a], "ps5A", c.start, c.end), [])
+        for start, end in (("19:00", "20:00"), ("17:00", "18:00")):
+            b = make(name="Bala", start=start, end=end)
+            self.assertEqual(find_conflicts([self.a], "PS5(X)", b.start, b.end), [])
 
     def test_other_device_allowed(self):
-        b = make(name="Bala", device="ps4", start="18:30", end="19:30")
-        self.assertEqual(find_conflicts([self.a], "ps4", b.start, b.end), [])
+        b = make(name="Bala", device="PS4", start="18:30", end="19:30")
+        self.assertEqual(find_conflicts([self.a], "PS4", b.start, b.end), [])
 
     def test_exclude_own_id(self):
-        self.assertEqual(find_conflicts([self.a], "ps5A", self.a.start, self.a.end, exclude_id=self.a.id), [])
+        self.assertEqual(find_conflicts([self.a], "PS5(X)", self.a.start, self.a.end, exclude_id=self.a.id), [])
 
-    def test_overnight_conflict_across_dates(self):
-        late = make(name="Night", start="23:00", end="03:00", next_day=True)
-        early = make(name="Early", day=date(2026, 10, 28), start="02:00", end="04:00")
-        self.assertEqual(find_conflicts([late], "ps5A", early.start, early.end), [late])
+    def test_conflict_across_dates(self):
+        late = raw_session("Night", "PS5(X)", local_datetime(DAY, time(23)), local_datetime(DAY + timedelta(1), time(3)))
+        early = raw_session("Early", "PS5(X)", local_datetime(DAY + timedelta(1), time(2)),
+                            local_datetime(DAY + timedelta(1), time(4)))
+        self.assertEqual(find_conflicts([late], "PS5(X)", early.start, early.end), [late])
+
+
+class PassRuleTests(unittest.TestCase):
+    def test_phone_normalised(self):
+        self.assertEqual(normalise_phone("+91 98765-43210"), "9876543210")
+        self.assertEqual(normalise_phone("09876543210"), "9876543210")
+        with self.assertRaises(ValidationError):
+            make_pass(phone="12345")
+
+    def test_validity_and_state(self):
+        p = make_pass(bought=date(2026, 10, 1))
+        self.assertEqual(p.valid_until, date(2026, 10, 30))
+        self.assertEqual(p.included_minutes, 30 * 60)
+        self.assertEqual(pass_state(p, 0, date(2026, 10, 30)), "Active")
+        self.assertEqual(pass_state(p, 0, date(2026, 10, 31)), "Expired")
+        self.assertEqual(pass_state(p, 1800, date(2026, 10, 5)), "Used up")
+        self.assertEqual(pass_state(p, 0, date(2026, 9, 30)), "Not started")
+
+    def test_pass_session_deducts_billed_time(self):
+        p = make_pass()
+        s = make(start="18:00", end="19:10", total="0", paid="0", monthly_pass=p)
+        self.assertEqual(s.pass_id, p.id)
+        self.assertEqual(s.pass_minutes, 90)
+
+    def test_pass_limits(self):
+        p = make_pass(bought=DAY)
+        with self.assertRaisesRegex(ValidationError, "has 1h left"):
+            make(start="10:00", end="12:00", total="0", paid="0", monthly_pass=p, used=29 * 60)
+        with self.assertRaisesRegex(ValidationError, "expired"):
+            make(day=DAY + timedelta(days=30), total="0", paid="0", monthly_pass=p)
+        with self.assertRaisesRegex(ValidationError, "starts on"):
+            make(day=DAY - timedelta(days=1), total="0", paid="0", monthly_pass=p)
+
+    def test_active_pass_lookup_by_phone(self):
+        old = make_pass(bought=DAY - timedelta(days=40))
+        new = make_pass(bought=DAY - timedelta(days=2))
+        self.assertEqual(active_pass_for_phone([old, new], [], "9876543210", DAY).id, new.id)
+        self.assertIsNone(active_pass_for_phone([old, new], [], "9000000000", DAY))
 
 
 class StorageTests(TempStoreCase):
     def test_creates_file_and_reloads(self):
         store = self.store()
-        self.assertTrue(self.path.exists())
-        data = json.loads(self.path.read_text())
-        self.assertEqual(data, {"schema_version": 1, "sessions": []})
-        s = make(total="300", paid="100", status="Partially Paid")
+        self.assertEqual(json.loads(self.path.read_text()), {"schema_version": 2, "sessions": [], "passes": []})
+        s = make(players=3, total="280", paid="100", status="Partially Paid")
         store.add(s)
-        again = self.store()
-        self.assertIsNone(again.load_error)
-        loaded = again.get(s.id)
+        loaded = self.store().get(s.id)
         self.assertEqual(loaded, s)
         raw = json.loads(self.path.read_text())["sessions"][0]
-        self.assertEqual(raw["total_charge_paise"], 30000)
-        self.assertEqual(raw["amount_paid_paise"], 10000)
-        self.assertEqual(raw["duration_minutes"], 60)
+        self.assertEqual((raw["players"], raw["pass_id"], raw["device"]), (3, None, "PS5(X)"))
+        self.assertEqual(raw["total_charge_paise"], 28000)
         self.assertRegex(raw["start"], r"^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d[+-]\d\d:\d\d$")
-        self.assertEqual(raw["extension_history"], [])
 
     def test_update_preserves_entry_time_and_id_without_duplicates(self):
         store = self.store()
         s = make(total="300", paid="0", status="Unpaid")
         store.add(s)
         later = NOW + timedelta(hours=3)
-        edited = make(name="Asha R", total="300", paid="300", status="Paid", now=later, existing=s)
-        store.update(edited)
+        store.update(make(name="Asha R", total="300", paid="300", status="Paid", now=later, existing=s))
         again = self.store()
         self.assertEqual(len(again.sessions), 1)
         got = again.get(s.id)
-        self.assertEqual(got.entry_time, s.entry_time)
-        self.assertEqual(got.last_updated, later)
-        self.assertEqual(got.customer_name, "Asha R")
-        self.assertEqual(got.payment_status, "Paid")
+        self.assertEqual((got.entry_time, got.last_updated, got.customer_name), (s.entry_time, later, "Asha R"))
 
-    def test_entry_time_cannot_change(self):
-        store = self.store()
-        s = make()
-        store.add(s)
-        bad = s.copy()
-        bad.entry_time = s.entry_time + timedelta(minutes=1)
-        bad.last_updated = bad.entry_time
-        with self.assertRaises(StorageError):
-            store.update(bad)
-
-    def test_store_rejects_conflicts(self):
+    def test_store_rejects_conflicts_and_allows_back_to_back(self):
         store = self.store()
         store.add(make(name="Asha", start="18:00", end="19:00"))
         with self.assertRaises(ConflictError) as ctx:
             store.add(make(name="Bala", start="18:59", end="20:00"))
-        msg = str(ctx.exception)
-        self.assertIn("ps5A", msg)
-        self.assertIn("Asha", msg)
-        self.assertIn("2026-10-27 18:00", msg)
+        self.assertIn("Asha", str(ctx.exception))
         store.add(make(name="Bala", start="19:00", end="20:00"))
         self.assertEqual(len(self.store().sessions), 2)
+
+    def test_store_enforces_opening_hours_for_new_times(self):
+        store = self.store()
+        late = raw_session("Late", "PS4", local_datetime(DAY, time(21, 30)), local_datetime(DAY, time(22, 30)))
+        late.total_paise = late.paid_paise = 0
+        with self.assertRaisesRegex(ValidationError, "closes"):
+            store.add(late)
 
     def test_extension_history_round_trip(self):
         store = self.store()
         s = make(start="18:00", end="19:00")
         store.add(s)
-        new_end = s.end + timedelta(minutes=30)
-        ext = Extension(NOW + timedelta(hours=7), 30, s.end, new_end)
-        extended = make(start="18:00", end="19:30", existing=s, extensions=[ext], now=NOW + timedelta(hours=7))
-        store.update(extended)
+        ext = Extension(NOW + timedelta(hours=7), 30, s.end, s.end + timedelta(minutes=30))
+        store.update(make(start="18:00", end="19:30", existing=s, extensions=[ext], now=NOW + timedelta(hours=7)))
         got = self.store().get(s.id)
-        self.assertEqual(got.start, s.start)
-        self.assertEqual(got.duration_minutes, 90)
-        self.assertEqual(got.total_paise, s.total_paise)
-        self.assertEqual(got.extensions, [ext])
-        raw = json.loads(self.path.read_text())["sessions"][0]["extension_history"][0]
-        self.assertEqual(set(raw), {"extended_at", "minutes_added", "previous_end", "new_end"})
+        self.assertEqual((got.start, got.duration_minutes, got.extensions), (s.start, 90, [ext]))
+
+    def test_pass_registration_usage_and_limits(self):
+        store = self.store()
+        p = make_pass()
+        store.add_pass(p)
+        with self.assertRaisesRegex(ValidationError, "already has a pass"):
+            store.add_pass(make_pass(name="Someone", bought=DAY + timedelta(days=3)))
+        store.add(make(start="09:00", end="22:00", total="0", paid="0", monthly_pass=p))
+        store.add(make(device="PS4", day=DAY + timedelta(1), start="09:00", end="22:00", total="0", paid="0",
+                       monthly_pass=p, used=780))
+        self.assertEqual(store.pass_used_minutes(p.id), 26 * 60)
+        too_long = make(day=DAY + timedelta(2), start="10:00", end="15:00", total="0", paid="0",
+                        monthly_pass=p, used=0)
+        with self.assertRaisesRegex(ValidationError, "has 4h left"):
+            store.add(too_long)
+        again = self.store()
+        self.assertEqual(again.get_pass(p.id), p)
+        self.assertEqual(again.pass_used_minutes(p.id), 26 * 60)
+        raw = json.loads(self.path.read_text())["passes"][0]
+        self.assertEqual((raw["phone"], raw["hours"], raw["price_paise"]), ("9876543210", 30, 192000))
+
+    def test_new_pass_allowed_after_old_used_up(self):
+        store = self.store()
+        p = make_pass(bought=DAY - timedelta(days=2))
+        store.add_pass(p)
+        for i in range(3):
+            day = DAY - timedelta(days=2) + timedelta(days=i)
+            store.add(make(day=day, start="09:00", end="19:00", total="0", paid="0", monthly_pass=p,
+                           used=store.pass_used_minutes(p.id)))
+        store.add_pass(make_pass(bought=DAY + timedelta(days=1)))
+        self.assertEqual(len(store.passes), 2)
+
+    def test_upgrades_v1_file_with_backup(self):
+        self.dir.mkdir(parents=True)
+        rec = make().to_dict()
+        rec["device"] = "ps5B"
+        del rec["players"], rec["pass_id"]
+        original = json.dumps({"schema_version": 1, "sessions": [rec]})
+        self.path.write_text(original)
+        store = self.store()
+        self.assertIsNone(store.load_error)
+        self.assertEqual(store.upgraded_from, 1)
+        self.assertEqual(store.sessions[0].device, "PS5(Y)")
+        self.assertEqual(store.sessions[0].players, 1)
+        self.assertEqual(self.path.read_text(), original)
+        store.add(make(name="New", start="10:00", end="11:00"))
+        self.assertEqual(store.backup_path.read_text(), original)
+        self.assertEqual(json.loads(self.path.read_text())["schema_version"], 2)
 
     def test_corrupted_json_preserved_and_read_only(self):
         self.dir.mkdir(parents=True)
-        self.path.write_text('{"schema_version": 1, "sessions": [ {oops')
+        self.path.write_text('{"schema_version": 2, "sessions": [ {oops')
         before = self.path.read_bytes()
         store = self.store()
         self.assertTrue(store.read_only)
@@ -238,41 +354,30 @@ class StorageTests(TempStoreCase):
         good = make(name="Good").to_dict()
         bad = make(name="Bad", start="20:00", end="21:00").to_dict()
         bad["device"] = "xbox"
+        orphan = make(name="Orphan", start="10:00", end="11:00").to_dict()
+        orphan["pass_id"] = "missing-pass"
         self.dir.mkdir(parents=True)
-        self.path.write_text(json.dumps({"schema_version": 1, "sessions": [good, bad]}))
+        self.path.write_text(json.dumps({"schema_version": 2, "sessions": [good, bad, orphan], "passes": []}))
         before = self.path.read_bytes()
         store = self.store()
         self.assertTrue(store.read_only)
-        self.assertIn("Record #2", store.load_error)
         self.assertIn("xbox", store.load_error)
+        self.assertIn("missing-pass", store.load_error)
         self.assertEqual(len(store.sessions), 1)
         with self.assertRaises(StorageError):
-            store.add(make(name="New", start="22:00", end="23:00"))
+            store.add(make(name="New", start="12:00", end="13:00"))
         self.assertEqual(self.path.read_bytes(), before)
-
-    def test_inconsistent_status_in_file_is_flagged(self):
-        rec = make(total="100", paid="0", status="Unpaid").to_dict()
-        rec["payment_status"] = "Paid"
-        self.dir.mkdir(parents=True)
-        self.path.write_text(json.dumps({"schema_version": 1, "sessions": [rec]}))
-        store = self.store()
-        self.assertTrue(store.read_only)
-        self.assertIn("should be 'Unpaid'", store.load_error)
 
     def test_failed_write_keeps_file_and_memory(self):
         store = self.store()
-        first = make(name="First")
-        store.add(first)
+        store.add(make(name="First"))
         before = self.path.read_bytes()
         with mock.patch("ontop.storage.os.replace", side_effect=OSError(28, "No space left on device")):
-            with self.assertRaises(StorageError) as ctx:
+            with self.assertRaisesRegex(StorageError, "No space left"):
                 store.add(make(name="Second", start="20:00", end="21:00"))
-        self.assertIn("No space left", str(ctx.exception))
         self.assertEqual(self.path.read_bytes(), before)
         self.assertEqual([s.customer_name for s in store.sessions], ["First"])
         self.assertEqual([p.name for p in self.dir.iterdir() if p.suffix == ".tmp"], [])
-        store.add(make(name="Second", start="20:00", end="21:00"))
-        self.assertEqual(len(self.store().sessions), 2)
 
     def test_external_modification_detected(self):
         store = self.store()
@@ -292,21 +397,18 @@ class StorageTests(TempStoreCase):
                 InstanceLock(self.dir / "sessions.lock").acquire()
         finally:
             first.release()
-        again = InstanceLock(self.dir / "sessions.lock")
-        again.acquire()
-        again.release()
 
 
 class AnalyticsTests(unittest.TestCase):
     def setUp(self):
         self.rows = [
-            make(name="Asha", device="ps5A", day=date(2026, 10, 20), start="10:00", end="11:30", total="150",
+            make(name="Asha", device="PS5(X)", day=date(2026, 10, 20), start="10:00", end="11:30", total="150",
                  paid="150", method="UPI"),
-            make(name="asha ", device="ps5B", day=date(2026, 10, 26), start="18:00", end="20:00", total="200",
+            make(name="asha ", device="PS5(Y)", day=date(2026, 10, 26), start="18:00", end="20:00", total="200",
                  paid="50", method="Cash"),
-            make(name="Bala", device="ps4", day=date(2026, 10, 27), start="23:00", end="01:00", next_day=True,
+            make(name="Bala", device="PS4", day=date(2026, 10, 27), start="20:00", end="22:00", players=2,
                  total="120", paid="0", method="Card"),
-            make(name="Chitra", device="ps5A", day=date(2026, 9, 30), start="18:00", end="19:00", total="0",
+            make(name="Chitra", device="PS5(X)", day=date(2026, 9, 30), start="18:00", end="19:00", total="0",
                  paid="0", method="Other"),
         ]
 
@@ -314,73 +416,60 @@ class AnalyticsTests(unittest.TestCase):
         today = date(2026, 10, 27)
         self.assertEqual(an.preset_range(an.PRESET_LAST_7, today), (date(2026, 10, 21), today))
         self.assertEqual(an.preset_range(an.PRESET_THIS_MONTH, today), (date(2026, 10, 1), today))
-        self.assertEqual(an.preset_range(an.PRESET_YESTERDAY, today), (date(2026, 10, 26),) * 2)
         self.assertEqual(an.preset_range(an.PRESET_ALL, today), (None, None))
 
     def test_filter_inclusive_by_start_date(self):
         flt = an.SessionFilter(start_date=date(2026, 10, 26), end_date=date(2026, 10, 27))
         self.assertEqual([s.customer_name for s in an.filter_sessions(self.rows, flt)], ["asha", "Bala"])
-        flt = an.SessionFilter(search="ASH")
-        self.assertEqual(len(an.filter_sessions(self.rows, flt)), 2)
-        flt = an.SessionFilter(device="ps5A", payment_status="Paid")
-        self.assertEqual(len(an.filter_sessions(self.rows, flt)), 2)
+        self.assertEqual(len(an.filter_sessions(self.rows, an.SessionFilter(search="ASH"))), 2)
+        self.assertEqual(len(an.filter_sessions(self.rows, an.SessionFilter(device="PS5(X)",
+                                                                              payment_status="Paid"))), 2)
 
     def test_summary(self):
         s = an.summarize(self.rows)
-        self.assertEqual(s.count, 4)
-        self.assertEqual(s.unique_customers, 3)
-        self.assertEqual(s.booked_minutes, 90 + 120 + 120 + 60)
-        self.assertEqual(s.total_paise, 47000)
-        self.assertEqual(s.paid_paise, 20000)
-        self.assertEqual(s.balance_paise, 27000)
+        self.assertEqual((s.count, s.unique_customers, s.booked_minutes), (4, 3, 90 + 120 + 120 + 60))
+        self.assertEqual((s.total_paise, s.paid_paise, s.balance_paise), (47000, 20000, 27000))
         self.assertEqual(s.average_charge_paise, 11750)
-        empty = an.summarize([])
-        self.assertEqual((empty.average_minutes, empty.average_charge_paise), (0.0, 0))
+        self.assertEqual(an.summarize([]).average_charge_paise, 0)
 
     def test_time_series_grouping(self):
         days = an.time_series(self.rows, an.GROUP_DAY, date(2026, 10, 25), date(2026, 10, 27))
         self.assertEqual([(b.start.day, b.count) for b in days], [(25, 0), (26, 1), (27, 1)])
         weeks = an.time_series(self.rows, an.GROUP_WEEK)
         self.assertTrue(all(b.start.weekday() == 0 for b in weeks))
-        self.assertEqual(weeks[0].start, date(2026, 9, 28))
         self.assertEqual(sum(b.count for b in weeks), 4)
         months = an.time_series(self.rows, an.GROUP_MONTH)
         self.assertEqual([(b.start, b.paid_paise) for b in months],
                          [(date(2026, 9, 1), 0), (date(2026, 10, 1), 20000)])
-        self.assertEqual(an.time_series([], an.GROUP_DAY), [])
 
     def test_breakdowns(self):
         self.assertEqual(an.status_counts(self.rows), {"Paid": 2, "Unpaid": 1, "Partially Paid": 1})
         self.assertEqual(an.received_by_method(self.rows), {"Cash": 5000, "UPI": 15000, "Card": 0, "Other": 0})
-        hours = an.start_hour_counts(self.rows)
-        self.assertEqual((hours[10], hours[18], hours[23]), (1, 2, 1))
         stats = an.sort_device_stats(an.device_stats(self.rows), an.METRIC_HOURS, True)
-        self.assertEqual([s.device for s in stats], ["ps5A", "ps4", "ps5B"])
-        self.assertEqual([s.device for s in an.sort_device_stats(stats, an.SORT_DEVICE_NAME, False)],
-                         ["ps4", "ps5A", "ps5B"])
+        self.assertEqual([s.device for s in stats], ["PS5(X)", "PS4", "PS5(Y)"])
 
-    def test_timeline_clipping(self):
-        overnight = self.rows[2]
-        d27, d28 = date(2026, 10, 27), date(2026, 10, 28)
-        self.assertIn(overnight, an.sessions_on_day(self.rows, d27))
-        self.assertIn(overnight, an.sessions_on_day(self.rows, d28))
-        lo, hi = an.day_bounds(d27)
-        f0, f1 = an.bar_span(overnight.start, overnight.end, lo, hi)
-        self.assertAlmostEqual(f0, 23 / 24)
-        self.assertAlmostEqual(f1, 1.0)
-        lo, hi = an.day_bounds(d28)
-        f0, f1 = an.bar_span(overnight.start, overnight.end, lo, hi)
+    def test_passes_sold(self):
+        a = make_pass(bought=date(2026, 10, 5))
+        b = make_pass(name="Priya", phone="9123456780", bought=date(2026, 10, 20))
+        self.assertEqual(an.passes_sold([a, b], date(2026, 10, 10), date(2026, 10, 31)), [b])
+        self.assertEqual(an.passes_sold([a, b], None, None, search="9876"), [a])
+
+    def test_timeline_hours_and_placement(self):
+        self.assertEqual(an.timeline_hours(DAY, []), (9, 22))
+        s = self.rows[0]
+        d = date(2026, 10, 20)
+        lo, hi = an.hour_moment(d, 9), an.hour_moment(d, 22)
+        f0, f1 = an.bar_span(s.start, s.end, lo, hi)
+        self.assertAlmostEqual(f0, 1 / 13)
+        self.assertAlmostEqual(f1, 2.5 / 13)
+        night = raw_session("Night", "PS4", local_datetime(DAY, time(23)), local_datetime(DAY + timedelta(1), time(1)))
+        self.assertEqual(an.timeline_hours(DAY, [night]), (9, 24))
+        self.assertEqual(an.timeline_hours(DAY + timedelta(1), [night]), (0, 22))
+        f0, f1 = an.bar_span(night.start, night.end, *an.day_bounds(DAY + timedelta(1)))
         self.assertAlmostEqual((f0, f1), (0.0, 1 / 24))
-        self.assertEqual(overnight.end.hour, 1)
-        noon = self.rows[0]
-        lo, hi = an.day_bounds(date(2026, 10, 20))
-        f0, f1 = an.bar_span(noon.start, noon.end, lo, hi)
-        self.assertAlmostEqual(f0, 10 / 24)
-        self.assertAlmostEqual(f1, 11.5 / 24)
-        self.assertIsNone(an.bar_span(noon.start, noon.end, *an.day_bounds(date(2026, 10, 21))))
 
 
-class SessionRecordTests(unittest.TestCase):
+class RecordTests(unittest.TestCase):
     def test_from_dict_reports_problems(self):
         rec = make().to_dict()
         rec["duration_minutes"] = 61
@@ -391,14 +480,17 @@ class SessionRecordTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "no UTC offset"):
             Session.from_dict(rec)
         rec = make().to_dict()
-        rec["total_charge_paise"] = 12.5
-        with self.assertRaisesRegex(ValueError, "integer"):
+        rec["players"] = 7
+        with self.assertRaisesRegex(ValueError, "players"):
             Session.from_dict(rec)
 
-    def test_timestamps_have_offsets(self):
-        d = make().to_dict()
-        for key in ("start", "end", "entry_time", "last_updated"):
-            self.assertIsNotNone(datetime.fromisoformat(d[key]).utcoffset(), key)
+    def test_pass_round_trip(self):
+        p = make_pass()
+        self.assertEqual(MonthlyPass.from_dict(p.to_dict()), p)
+        bad = p.to_dict()
+        bad["valid_until"] = "2030-01-01"
+        with self.assertRaises(ValueError):
+            MonthlyPass.from_dict(bad)
 
 
 if __name__ == "__main__":

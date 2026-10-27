@@ -29,7 +29,7 @@ STATUS_COLORS = {
     STATUS_PARTIAL: WARNING,
 }
 
-DEVICE_COLORS = {"ps5A": "#7c6cff", "ps5B": "#38bdf8", "ps4": "#f472b6"}
+DEVICE_COLORS = {"PS5(X)": "#7c6cff", "PS5(Y)": "#38bdf8", "PS4": "#f472b6"}
 
 FONTS: dict[str, tkfont.Font] = {}
 
@@ -164,6 +164,16 @@ def apply_theme(root: tk.Tk) -> None:
         "TNotebook.Tab",
         background=[("selected", ACCENT), ("active", SURFACE_2)],
         foreground=[("selected", "#ffffff"), ("active", TEXT)],
+        lightcolor=[("selected", ACCENT)],
+    )
+
+    style.configure("Sub.TNotebook", background=BG, borderwidth=0, tabmargins=(24, 10, 24, 0))
+    style.configure("Sub.TNotebook.Tab", background=BG, foreground=MUTED, padding=(16, 6), borderwidth=0,
+                    font=FONTS["bold"])
+    style.map(
+        "Sub.TNotebook.Tab",
+        background=[("selected", SURFACE_2), ("active", SURFACE)],
+        foreground=[("selected", TEXT), ("active", TEXT)],
         lightcolor=[("selected", ACCENT)],
     )
 

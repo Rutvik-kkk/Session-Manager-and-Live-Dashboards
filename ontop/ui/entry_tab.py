@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import tkinter as tk
+from datetime import timedelta
 from tkinter import messagebox, ttk
 from typing import TYPE_CHECKING
 
+from ..config import CLOSING_TIME, DEVICES, OPENING_TIME, PLAYER_COUNTS
 from ..formatting import (
     fmt_date,
     fmt_date_long,
@@ -14,34 +16,39 @@ from ..formatting import (
     fmt_duration,
     fmt_money,
     fmt_range,
-    fmt_time,
+    local_datetime,
     now_local,
     paise_to_input,
     parse_date,
     parse_money,
     parse_time,
-    local_datetime,
     to_local,
 )
 from ..models import (
-    DEVICES,
-    MAX_DURATION_MINUTES,
     PAYMENT_METHODS,
     PAYMENT_STATUSES,
     ConflictError,
     Extension,
+    MonthlyPass,
     Session,
     ValidationError,
+    active_pass_for_phone,
     add_minutes,
     build_times,
     conflict_message,
     duration_between,
     duration_minutes_problem,
     find_conflicts,
+    fmt_phone,
+    max_minutes_until_close,
+    normalise_phone,
+    opening_hours_text,
+    pass_session_problems,
     payment_problems,
     prepare_session,
     suggest_status,
 )
+from ..pricing import billable_minutes, charge_explanation, players_problem, suggested_charge
 from ..storage import StorageError
 from . import theme
 from .widgets import DateEntry, ScrollableFrame, Tooltip, card
@@ -63,13 +70,17 @@ class SessionEntryTab(ttk.Frame):
         self._syncing = False
         self._editing: Session | None = None
         self._pending: list[Extension] = []
+        self._pass: MonthlyPass | None = None
+        self._amount_auto = True
 
+        self.pass_var = tk.BooleanVar(value=False)
+        self.phone_var = tk.StringVar()
         self.name_var = tk.StringVar()
         self.device_var = tk.StringVar()
+        self.players_var = tk.StringVar(value="1")
         self.date_var = tk.StringVar()
         self.start_var = tk.StringVar()
         self.end_var = tk.StringVar()
-        self.next_day_var = tk.BooleanVar(value=False)
         self.dur_h_var = tk.StringVar()
         self.dur_m_var = tk.StringVar()
         self.extend_var = tk.StringVar(value="30")
@@ -81,12 +92,16 @@ class SessionEntryTab(ttk.Frame):
 
         self._build()
 
-        for var in (self.date_var, self.start_var, self.end_var, self.next_day_var):
+        for var in (self.date_var, self.start_var, self.end_var):
             var.trace_add("write", lambda *_: self._on_times_changed())
         for var in (self.dur_h_var, self.dur_m_var):
             var.trace_add("write", lambda *_: self._on_duration_changed())
-        for var in (self.total_var, self.paid_var):
-            var.trace_add("write", lambda *_: self._on_amounts_changed())
+        for var in (self.device_var, self.players_var):
+            var.trace_add("write", lambda *_: self._on_pricing_input_changed())
+        for var in (self.pass_var, self.phone_var):
+            var.trace_add("write", lambda *_: self._on_pass_input_changed())
+        self.total_var.trace_add("write", lambda *_: self._on_total_typed())
+        self.paid_var.trace_add("write", lambda *_: self._on_amounts_changed())
         self.status_var.trace_add("write", lambda *_: self._on_status_changed())
 
         self.clear_form()
@@ -157,15 +172,36 @@ class SessionEntryTab(ttk.Frame):
 
     def _build_customer(self, parent):
         f = self._section(parent, "Customer & device")
-        self._field_label(f, "Customer name", 2, True)
+        ttk.Checkbutton(f, text="Monthly pass holder (time comes off their pass)", variable=self.pass_var,
+                        style="Card.TCheckbutton").grid(row=2, column=0, columnspan=4, sticky="w", pady=(8, 2))
+        self.phone_label = ttk.Label(f, text="Pass phone no. *", style="CardMuted.TLabel")
+        self.phone_label.grid(row=3, column=0, sticky="w", padx=(0, 14), pady=6)
+        row = ttk.Frame(f, style="Inner.TFrame")
+        row.grid(row=3, column=1, columnspan=3, sticky="w", pady=6)
+        self.phone_entry = ttk.Entry(row, textvariable=self.phone_var, width=16)
+        self.phone_entry.pack(side="left")
+        self.register_pass_btn = ttk.Button(row, text="Register new pass", style="Small.TButton",
+                                            command=self._register_pass)
+        self.register_pass_btn.pack(side="left", padx=(8, 0))
+        self.pass_info = ttk.Label(f, style="CardMuted.TLabel", wraplength=520, justify="left")
+        self.pass_info.grid(row=4, column=0, columnspan=4, sticky="w", pady=(0, 4))
+
+        self._field_label(f, "Customer name", 5, True)
         self.name_entry = ttk.Entry(f, textvariable=self.name_var)
-        self.name_entry.grid(row=2, column=1, columnspan=3, sticky="ew", pady=6)
-        self._field_label(f, "Device", 3, True)
+        self.name_entry.grid(row=5, column=1, columnspan=3, sticky="ew", pady=6)
+        self._field_label(f, "Device", 6, True)
         self.device_combo = ttk.Combobox(f, textvariable=self.device_var, values=DEVICES, state="readonly", width=14)
-        self.device_combo.grid(row=3, column=1, sticky="w", pady=6)
+        self.device_combo.grid(row=6, column=1, sticky="w", pady=6)
+        self._field_label(f, "No. of players", 7, True)
+        self.players_combo = ttk.Combobox(f, textvariable=self.players_var, values=[str(n) for n in PLAYER_COUNTS],
+                                          state="readonly", width=6)
+        self.players_combo.grid(row=7, column=1, sticky="w", pady=6)
+        ttk.Label(f, text="2–4 players: minimum 1 hour", style="CardSmall.TLabel").grid(
+            row=7, column=2, columnspan=2, sticky="w", padx=8)
 
     def _build_timing(self, parent):
-        f = self._section(parent, "Timing", "24-hour times (HH:MM) in this computer's local timezone.")
+        f = self._section(parent, "Timing",
+                          f"Open {opening_hours_text()} · 24-hour times (HH:MM) in this computer's local timezone.")
         self._field_label(f, "Session date", 2, True)
         row = ttk.Frame(f, style="Inner.TFrame")
         row.grid(row=2, column=1, columnspan=3, sticky="w", pady=6)
@@ -182,17 +218,14 @@ class SessionEntryTab(ttk.Frame):
         ttk.Button(row, text="Now", style="Small.TButton", command=self._start_now).pack(side="left", padx=(8, 0))
 
         self._field_label(f, "End time", 4, True)
-        row = ttk.Frame(f, style="Inner.TFrame")
-        row.grid(row=4, column=1, columnspan=3, sticky="w", pady=6)
-        self.end_entry = ttk.Entry(row, textvariable=self.end_var, width=8)
-        self.end_entry.pack(side="left")
-        ttk.Checkbutton(row, text="Ends next day (past midnight)", variable=self.next_day_var,
-                        style="Card.TCheckbutton").pack(side="left", padx=(14, 0))
+        self.end_entry = ttk.Entry(f, textvariable=self.end_var, width=8)
+        self.end_entry.grid(row=4, column=1, sticky="w", pady=6)
 
         self._field_label(f, "Duration", 5, True)
         row = ttk.Frame(f, style="Inner.TFrame")
         row.grid(row=5, column=1, columnspan=3, sticky="w", pady=6)
-        self.dur_h_spin = ttk.Spinbox(row, from_=0, to=24, increment=1, width=4, textvariable=self.dur_h_var)
+        max_hours = CLOSING_TIME.hour - OPENING_TIME.hour
+        self.dur_h_spin = ttk.Spinbox(row, from_=0, to=max_hours, increment=1, width=4, textvariable=self.dur_h_var)
         self.dur_h_spin.pack(side="left")
         ttk.Label(row, text="hours", style="CardMuted.TLabel").pack(side="left", padx=(6, 14))
         self.dur_m_spin = ttk.Spinbox(row, from_=0, to=59, increment=5, width=4, textvariable=self.dur_m_var)
@@ -205,7 +238,8 @@ class SessionEntryTab(ttk.Frame):
         self.timing_error.grid(row=7, column=0, columnspan=4, sticky="w", pady=(4, 0))
 
     def _build_payment(self, parent):
-        f = self._section(parent, "Payment", "Pricing is entered manually. Amounts are in INR (₹).")
+        f = self._section(parent, "Payment",
+                          "The amount is filled in from the price list. You can change it; amounts are in INR (₹).")
         self._field_label(f, "Payment method", 2, True)
         self.method_combo = ttk.Combobox(f, textvariable=self.method_var, values=PAYMENT_METHODS, state="readonly", width=14)
         self.method_combo.grid(row=2, column=1, sticky="w", pady=6)
@@ -213,29 +247,35 @@ class SessionEntryTab(ttk.Frame):
         self._field_label(f, "Payment amount (₹)", 3, True)
         self.total_entry = ttk.Entry(f, textvariable=self.total_var, width=16)
         self.total_entry.grid(row=3, column=1, sticky="w", pady=6)
-        ttk.Label(f, text="Total session charge", style="CardSmall.TLabel").grid(row=3, column=2, sticky="w", padx=8)
+        self.use_price_btn = ttk.Button(f, text="Use price list", style="Small.TButton", command=self.use_price_list)
+        self.use_price_btn.grid(row=3, column=2, sticky="w", padx=8)
+        Tooltip(self.use_price_btn, "Replace the amount with the price-list charge and keep it updated automatically.")
+        self.price_label = ttk.Label(f, style="CardSmall.TLabel", wraplength=480, justify="left")
+        self.price_label.grid(row=4, column=1, columnspan=3, sticky="w", pady=(0, 4))
 
-        self._field_label(f, "Amount paid (₹)", 4, True)
+        self._field_label(f, "Amount paid (₹)", 5, True)
         self.paid_entry = ttk.Entry(f, textvariable=self.paid_var, width=16)
-        self.paid_entry.grid(row=4, column=1, sticky="w", pady=6)
-        ttk.Label(f, text="Actually received so far", style="CardSmall.TLabel").grid(row=4, column=2, sticky="w", padx=8)
+        self.paid_entry.grid(row=5, column=1, sticky="w", pady=6)
+        ttk.Button(f, text="Paid in full", style="Small.TButton",
+                   command=lambda: self.paid_var.set(self.total_var.get())).grid(row=5, column=2, sticky="w", padx=8)
 
-        self._field_label(f, "Payment status", 5, True)
+        self._field_label(f, "Payment status", 6, True)
         self.status_combo = ttk.Combobox(f, textvariable=self.status_var, values=PAYMENT_STATUSES, state="readonly", width=16)
-        self.status_combo.grid(row=5, column=1, sticky="w", pady=6)
+        self.status_combo.grid(row=6, column=1, sticky="w", pady=6)
 
-        self._field_label(f, "Balance due", 6)
+        self._field_label(f, "Balance due", 7)
         self.balance_entry = ttk.Entry(f, textvariable=self.balance_var, width=16, state="readonly", style="Balance.TEntry")
-        self.balance_entry.grid(row=6, column=1, sticky="w", pady=6)
+        self.balance_entry.grid(row=7, column=1, sticky="w", pady=6)
 
         self.payment_msg = ttk.Label(f, style="CardMuted.TLabel", wraplength=480, justify="left")
-        self.payment_msg.grid(row=7, column=0, columnspan=4, sticky="w", pady=(8, 0))
+        self.payment_msg.grid(row=8, column=0, columnspan=4, sticky="w", pady=(8, 0))
 
     def _build_extend(self, parent):
         f = self._section(
             parent,
             "Extend session",
-            "Adds time to the end. The start time and payment amount stay the same.",
+            "Adds time to the end, up to closing time. The start time stays the same; the amount follows the "
+            "price list unless you changed it by hand.",
         )
         row = ttk.Frame(f, style="Inner.TFrame")
         row.grid(row=2, column=0, columnspan=4, sticky="w", pady=(10, 4))
@@ -271,7 +311,7 @@ class SessionEntryTab(ttk.Frame):
         self.action_bar = bar
         self.readonly_label = ttk.Label(bar, style="Error.TLabel")
         self.readonly_label.pack(side="right")
-        Tooltip(self.save_btn, "Validate and save this session to data/sessions.json (Ctrl+S)")
+        Tooltip(self.save_btn, "Validate and save this session (Ctrl+S)")
         Tooltip(self.update_btn, "Validate and save the changes to this existing session (Ctrl+S)")
         Tooltip(self.cancel_btn, "Discard every unsaved change, including pending extensions")
         self.bind_all("<Control-s>", self._on_ctrl_s, add="+")
@@ -314,21 +354,38 @@ class SessionEntryTab(ttk.Frame):
     # Form state
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _default_start():
+        now = now_local().replace(second=0)
+        today = now.date()
+        opening = local_datetime(today, OPENING_TIME)
+        closing = local_datetime(today, CLOSING_TIME)
+        if now < opening:
+            return opening
+        if now > closing - timedelta(minutes=30):
+            return local_datetime(today + timedelta(days=1), OPENING_TIME)
+        return now
+
     def clear_form(self):
         self._editing = None
         self._pending = []
-        now = now_local()
-        end = add_minutes(now.replace(second=0), DEFAULT_DURATION_MINUTES)
+        self._pass = None
+        self._amount_auto = True
+        start = self._default_start()
+        minutes = min(DEFAULT_DURATION_MINUTES, max_minutes_until_close(start))
+        end = add_minutes(start, minutes)
         self._syncing = True
         try:
+            self.pass_var.set(False)
+            self.phone_var.set("")
             self.name_var.set("")
             self.device_var.set("")
-            self.date_var.set(fmt_date(now.date()))
-            self.start_var.set(now.strftime("%H:%M"))
-            self.end_var.set(fmt_time(end))
-            self.next_day_var.set(end.date() > now.date())
-            self.dur_h_var.set(str(DEFAULT_DURATION_MINUTES // 60))
-            self.dur_m_var.set(str(DEFAULT_DURATION_MINUTES % 60))
+            self.players_var.set("1")
+            self.date_var.set(fmt_date(start.date()))
+            self.start_var.set(start.strftime("%H:%M"))
+            self.end_var.set(end.strftime("%H:%M"))
+            self.dur_h_var.set(str(minutes // 60))
+            self.dur_m_var.set(str(minutes % 60))
             self.extend_var.set("30")
             self.method_var.set("Cash")
             self.total_var.set("")
@@ -338,13 +395,12 @@ class SessionEntryTab(ttk.Frame):
             self._syncing = False
         self.extend_msg.configure(text="", style="CardMuted.TLabel")
         self._recalc_from_times()
-        self._refresh_payment(auto_status=True)
         self._render_history()
         self._show_mode_buttons()
         self.name_entry.focus_set()
 
     def _confirm_clear(self):
-        if self.name_var.get().strip() or self.total_var.get().strip():
+        if self.name_var.get().strip() or self.phone_var.get().strip():
             if not messagebox.askyesno("Clear form", "Clear all fields in this form?", parent=self):
                 return
         self.clear_form()
@@ -367,15 +423,21 @@ class SessionEntryTab(ttk.Frame):
                 return False
         self._editing = session
         self._pending = []
+        self._pass = self.app.store.get_pass(session.pass_id)
+        on_pass = self._pass is not None
+        self._amount_auto = session.total_paise == suggested_charge(
+            session.device, session.players, session.duration_minutes, on_pass)
         start, end = to_local(session.start), to_local(session.end)
         self._syncing = True
         try:
+            self.pass_var.set(on_pass)
+            self.phone_var.set(fmt_phone(self._pass.phone) if self._pass else "")
             self.name_var.set(session.customer_name)
             self.device_var.set(session.device)
+            self.players_var.set(str(session.players))
             self.date_var.set(fmt_date(start.date()))
             self.start_var.set(start.strftime("%H:%M"))
             self.end_var.set(end.strftime("%H:%M"))
-            self.next_day_var.set(end.date() > start.date())
             self.dur_h_var.set(str(session.duration_minutes // 60))
             self.dur_m_var.set(str(session.duration_minutes % 60))
             self.method_var.set(session.payment_method)
@@ -385,7 +447,17 @@ class SessionEntryTab(ttk.Frame):
         finally:
             self._syncing = False
         self.extend_msg.configure(text="", style="CardMuted.TLabel")
-        self._recalc_from_times()
+        try:
+            span = self._current_times()
+        except ValidationError:
+            span = None
+        if span:
+            self._show_span(*span)
+        else:
+            self.span_label.configure(text=f"{fmt_range(session.start, session.end)} · "
+                                           f"{fmt_duration(session.duration_minutes)} (saved before current rules)")
+            self.timing_error.configure(text="")
+        self._resolve_pass(auto_amount=False)
         self._refresh_payment(auto_status=False)
         self._render_history()
         self._show_mode_buttons()
@@ -396,6 +468,24 @@ class SessionEntryTab(ttk.Frame):
         name = self._editing.customer_name if self._editing else ""
         self.clear_form()
         self.app.set_status(f"Edit cancelled — no changes were saved to {name}'s session.")
+
+    def start_with_pass(self, p: MonthlyPass):
+        """Prepare a new session for a pass holder (used from the Monthly Passes tab)."""
+        if self._editing and not messagebox.askyesno(
+            "Discard current edit?", "Discard the session you are editing and start a new pass session?",
+            parent=self,
+        ):
+            return False
+        if self._editing:
+            self.clear_form()
+        self.pass_var.set(True)
+        self.phone_var.set(fmt_phone(p.phone))
+        return True
+
+    def refresh_pass(self):
+        """Re-check the pass after passes or sessions change elsewhere."""
+        if self.pass_var.get():
+            self._resolve_pass(auto_amount=True)
 
     # ------------------------------------------------------------------
     # Linked time / duration fields
@@ -421,21 +511,22 @@ class SessionEntryTab(ttk.Frame):
     def _show_span(self, start, end):
         minutes = duration_between(start, end)
         s, e = to_local(start), to_local(end)
-        text = f"{fmt_date_long(s.date())} {s:%H:%M}  →  "
-        if e.date() > s.date():
-            text += f"{fmt_date_long(e.date())} {e:%H:%M}   ·   ends on the following date"
-        else:
-            text += f"{e:%H:%M}"
-        text += f"   ·   {fmt_duration(minutes)}"
+        billed = billable_minutes(minutes)
+        text = f"{fmt_date_long(s.date())}   {s:%H:%M} → {e:%H:%M}   ·   {fmt_duration(minutes)}"
+        if billed != minutes:
+            text += f" (billed as {fmt_duration(billed)})"
         self.span_label.configure(text=text)
         self.timing_error.configure(text="")
 
+    def _after_timing_change(self):
+        self._resolve_pass(auto_amount=True)
+
     def _recalc_from_times(self):
         try:
-            start, end = build_times(self.date_var.get(), self.start_var.get(), self.end_var.get(),
-                                     self.next_day_var.get())
+            start, end = self._current_times()
         except ValidationError as exc:
             self._set_timing_error(" ".join(exc.errors))
+            self._after_timing_change()
             return
         minutes = duration_between(start, end)
         self._syncing = True
@@ -445,6 +536,7 @@ class SessionEntryTab(ttk.Frame):
         finally:
             self._syncing = False
         self._show_span(start, end)
+        self._after_timing_change()
 
     def _parse_duration(self) -> int:
         try:
@@ -456,31 +548,178 @@ class SessionEntryTab(ttk.Frame):
             raise ValueError("Duration cannot be negative.")
         if mins > 59:
             raise ValueError("Duration minutes must be between 0 and 59.")
-        total = hours * 60 + mins
-        problem = duration_minutes_problem(total)
-        if problem:
-            raise ValueError(problem)
-        return total
+        return hours * 60 + mins
 
     def _recalc_from_duration(self):
         try:
             session_date = parse_date(self.date_var.get(), "Session date")
             start = local_datetime(session_date, parse_time(self.start_var.get(), "Start time"))
             minutes = self._parse_duration()
+            problem = duration_minutes_problem(minutes, start)
+            if problem:
+                raise ValueError(problem)
         except ValueError as exc:
             self._set_timing_error(str(exc))
+            self._after_timing_change()
             return
         end = add_minutes(start, minutes)
         self._syncing = True
         try:
             self.end_var.set(end.strftime("%H:%M"))
-            self.next_day_var.set(end.date() > session_date)
         finally:
             self._syncing = False
-        self._show_span(start, end)
+        self._recalc_from_times()
 
     def _current_times(self):
-        return build_times(self.date_var.get(), self.start_var.get(), self.end_var.get(), self.next_day_var.get())
+        return build_times(self.date_var.get(), self.start_var.get(), self.end_var.get())
+
+    def _current_minutes(self) -> int | None:
+        try:
+            start, end = self._current_times()
+        except ValidationError:
+            return None
+        return duration_between(start, end)
+
+    def _players(self) -> int | None:
+        try:
+            return int(self.players_var.get())
+        except ValueError:
+            return None
+
+    # ------------------------------------------------------------------
+    # Monthly pass
+    # ------------------------------------------------------------------
+
+    def _on_pass_input_changed(self):
+        if not self._syncing:
+            self._resolve_pass(auto_amount=True)
+
+    def _register_pass(self):
+        self.app.open_pass_registration(phone=self.phone_var.get(), name=self.name_var.get())
+
+    def _pass_used_by_others(self, p: MonthlyPass) -> int:
+        return self.app.store.pass_used_minutes(p.id, self._editing.id if self._editing else None)
+
+    def _resolve_pass(self, auto_amount: bool):
+        on = self.pass_var.get()
+        state = "normal" if on else "disabled"
+        self.phone_entry.configure(state=state)
+        self.register_pass_btn.configure(state=state)
+        if not on:
+            self._pass = None
+            self.pass_info.configure(text="")
+            self.name_entry.configure(state="normal")
+            self._update_price(auto_amount)
+            return
+
+        def info(text: str, style: str = "CardMuted.TLabel"):
+            self.pass_info.configure(text=text, style=style)
+
+        phone = normalise_phone(self.phone_var.get())
+        if len(phone) != 10:
+            self._pass = None
+            self.name_entry.configure(state="normal")
+            info("Enter the pass holder's 10-digit phone number.", "CardWarn.TLabel")
+            self._update_price(auto_amount)
+            return
+        try:
+            session_date = parse_date(self.date_var.get())
+        except ValueError:
+            session_date = now_local().date()
+        store = self.app.store
+        exclude = self._editing.id if self._editing else None
+        found = None
+        if self._editing and self._editing.pass_id:
+            original = store.get_pass(self._editing.pass_id)
+            if original and original.phone == phone:
+                found = original
+        found = found or active_pass_for_phone(store.passes, store.sessions, phone, session_date, exclude)
+        self._pass = found
+        if found is None:
+            self.name_entry.configure(state="normal")
+            info(f"No monthly pass for {fmt_phone(phone)} is valid on {fmt_date_long(session_date)}. "
+                 "Check the number or use 'Register new pass'.", "CardError.TLabel")
+            self._update_price(auto_amount)
+            return
+
+        self._syncing = True
+        try:
+            self.name_var.set(found.holder_name)
+        finally:
+            self._syncing = False
+        self.name_entry.configure(state="readonly")
+        left = found.included_minutes - self._pass_used_by_others(found)
+        text = (f"✓ {found.holder_name}'s pass · {fmt_duration(max(left, 0))} left of {found.hours}h · "
+                f"valid {fmt_date_long(found.purchased_on)} – {fmt_date_long(found.valid_until)}")
+        minutes = self._current_minutes()
+        style = "CardOk.TLabel"
+        if minutes is not None:
+            need = billable_minutes(minutes)
+            problems = pass_session_problems(found, session_date, need, found.included_minutes - left)
+            if problems:
+                text += "\n" + " ".join(problems)
+                style = "CardError.TLabel"
+            else:
+                text += f"\nThis session uses {fmt_duration(need)}; {fmt_duration(left - need)} will remain."
+        info(text, style)
+        self._update_price(auto_amount)
+
+    # ------------------------------------------------------------------
+    # Price list
+    # ------------------------------------------------------------------
+
+    def _on_pricing_input_changed(self):
+        if not self._syncing:
+            self._update_price(auto_amount=True)
+
+    def _on_total_typed(self):
+        if self._syncing:
+            return
+        self._amount_auto = False
+        self._update_price(auto_amount=False)
+        self._refresh_payment(auto_status=True)
+
+    def use_price_list(self):
+        self._amount_auto = True
+        self._update_price(auto_amount=True)
+
+    def _suggestion(self) -> tuple[int | None, str]:
+        device, players, minutes = self.device_var.get(), self._players(), self._current_minutes()
+        if device not in DEVICES:
+            return None, "Select a device to see the price-list amount."
+        if minutes is None:
+            return None, "Enter valid times to see the price-list amount."
+        problem = players_problem(players, minutes)
+        if problem:
+            return None, problem
+        on_pass = self._pass is not None and self.pass_var.get()
+        amount = suggested_charge(device, players, minutes, on_pass)
+        return amount, charge_explanation(device, players, minutes, on_pass)
+
+    def _update_price(self, auto_amount: bool):
+        amount, explanation = self._suggestion()
+        if amount is None:
+            self.price_label.configure(text=explanation, style="CardWarn.TLabel")
+            self._refresh_payment(auto_status=True)
+            return
+        if self._amount_auto and auto_amount and self.total_var.get() != paise_to_input(amount):
+            self._syncing = True
+            try:
+                self.total_var.set(paise_to_input(amount))
+            finally:
+                self._syncing = False
+        try:
+            matches = parse_money(self.total_var.get()) == amount
+        except ValueError:
+            matches = False
+        if matches:
+            text, style = f"Price list: {fmt_money(amount)} — {explanation}", "CardSmall.TLabel"
+        else:
+            text = (f"Edited by hand. Price list would be {fmt_money(amount)} — {explanation}. "
+                    "Click 'Use price list' to switch back.")
+            style = "CardWarn.TLabel"
+        self.price_label.configure(text=text, style=style)
+        self._refresh_payment(auto_status=True)
 
     # ------------------------------------------------------------------
     # Extensions
@@ -497,9 +736,6 @@ class SessionEntryTab(ttk.Frame):
                 fail("Invalid extension", "Enter the number of minutes to add as a whole number greater than zero.")
                 return
             minutes = int(raw)
-        if minutes > MAX_DURATION_MINUTES:
-            fail("Invalid extension", "An extension cannot add more than 24 hours.")
-            return
         try:
             start, end = self._current_times()
         except ValidationError as exc:
@@ -511,30 +747,31 @@ class SessionEntryTab(ttk.Frame):
             return
         new_end = add_minutes(end, minutes)
         new_minutes = duration_between(start, new_end)
-        if new_minutes > MAX_DURATION_MINUTES:
+        if new_minutes > max_minutes_until_close(start):
             fail(
-                "Extension too long",
-                f"Adding {minutes} min would make the session {fmt_duration(new_minutes)} long. "
-                "Sessions can be at most 24 hours.",
+                "Past closing time",
+                f"Adding {minutes} min would end the session at {to_local(new_end):%H:%M}, after closing time "
+                f"({CLOSING_TIME:%H:%M}). The latest it can be extended to is {CLOSING_TIME:%H:%M}.",
             )
             return
+        if self.pass_var.get() and self._pass is not None:
+            problems = pass_session_problems(self._pass, to_local(start).date(), billable_minutes(new_minutes),
+                                             self._pass_used_by_others(self._pass))
+            if problems:
+                fail("Not enough time on the pass", bullet_list(problems))
+                return
         exclude = self._editing.id if self._editing else None
         conflicts = find_conflicts(self.app.store.sessions, device, start, new_end, exclude_id=exclude)
         if conflicts:
             fail("Device unavailable", conflict_message(device, conflicts))
             return
 
-        session_date = to_local(start).date()
-        local_new_end = to_local(new_end)
         self._syncing = True
         try:
-            self.end_var.set(local_new_end.strftime("%H:%M"))
-            self.next_day_var.set(local_new_end.date() > session_date)
-            self.dur_h_var.set(str(new_minutes // 60))
-            self.dur_m_var.set(str(new_minutes % 60))
+            self.end_var.set(to_local(new_end).strftime("%H:%M"))
         finally:
             self._syncing = False
-        self._show_span(start, new_end)
+        self._recalc_from_times()
 
         if self._editing:
             self._pending.append(Extension(now_local(), minutes, end, new_end))
@@ -617,13 +854,23 @@ class SessionEntryTab(ttk.Frame):
     # ------------------------------------------------------------------
 
     def _build_session(self) -> Session:
+        monthly_pass = None
+        used = 0
+        if self.pass_var.get():
+            if self._pass is None:
+                raise ValidationError([
+                    "'Monthly pass holder' is ticked but no valid pass was found for that phone number. "
+                    "Register the pass first, or untick the box to bill the session normally."
+                ])
+            monthly_pass = self._pass
+            used = self._pass_used_by_others(monthly_pass)
         return prepare_session(
             customer_name=self.name_var.get(),
             device=self.device_var.get(),
+            players=self._players(),
             date_text=self.date_var.get(),
             start_text=self.start_var.get(),
             end_text=self.end_var.get(),
-            ends_next_day=self.next_day_var.get(),
             payment_method=self.method_var.get(),
             total_text=self.total_var.get(),
             paid_text=self.paid_var.get(),
@@ -631,6 +878,8 @@ class SessionEntryTab(ttk.Frame):
             now=now_local(),
             existing=self._editing,
             new_extensions=self._pending,
+            monthly_pass=monthly_pass,
+            pass_used_by_others=used,
         )
 
     def _persist(self, updating: bool) -> Session | None:
@@ -659,6 +908,19 @@ class SessionEntryTab(ttk.Frame):
             return None
         return session
 
+    def _summary(self, session: Session) -> str:
+        players = f"{session.players} player{'s' if session.players != 1 else ''}"
+        text = (f"{session.customer_name} · {session.device} · {players}\n"
+                f"{fmt_range(session.start, session.end)} ({fmt_duration(session.duration_minutes)})\n"
+                f"Charge {fmt_money(session.total_paise)} · Paid {fmt_money(session.paid_paise)} · "
+                f"{session.payment_status}")
+        if session.pass_id:
+            p = self.app.store.get_pass(session.pass_id)
+            left = p.included_minutes - self.app.store.pass_used_minutes(p.id)
+            text += (f"\nMonthly pass: {fmt_duration(session.pass_minutes)} used, "
+                     f"{fmt_duration(max(left, 0))} left")
+        return text
+
     def save(self):
         if self._editing:
             self.update()
@@ -669,14 +931,7 @@ class SessionEntryTab(ttk.Frame):
         self.clear_form()
         self.app.data_changed()
         self.app.set_status(f"Saved {session.customer_name} on {session.device}.")
-        messagebox.showinfo(
-            "Session saved",
-            f"Saved session for {session.customer_name} on {session.device}\n"
-            f"{fmt_range(session.start, session.end)} ({fmt_duration(session.duration_minutes)})\n"
-            f"Charge {fmt_money(session.total_paise)} · Paid {fmt_money(session.paid_paise)} · "
-            f"{session.payment_status}",
-            parent=self,
-        )
+        messagebox.showinfo("Session saved", "Saved session:\n" + self._summary(session), parent=self)
 
     def update(self):
         if not self._editing:
@@ -690,11 +945,4 @@ class SessionEntryTab(ttk.Frame):
         self.app.data_changed()
         self.app.set_status(f"Updated {session.customer_name}'s session.")
         extra = f"\nIncludes {added} min of new extensions." if added else ""
-        messagebox.showinfo(
-            "Session updated",
-            f"Updated {session.customer_name}'s session on {session.device}\n"
-            f"{fmt_range(session.start, session.end)} ({fmt_duration(session.duration_minutes)})\n"
-            f"Charge {fmt_money(session.total_paise)} · Paid {fmt_money(session.paid_paise)} · "
-            f"{session.payment_status}{extra}",
-            parent=self,
-        )
+        messagebox.showinfo("Session updated", "Updated session:\n" + self._summary(session) + extra, parent=self)

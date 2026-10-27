@@ -28,6 +28,9 @@ def session_columns(include_session_date: bool = True, include_end: bool = True,
     cols = [
         Column("customer", "Customer", lambda s: s.customer_name, lambda s: (s.customer_name.casefold(), s.start), 170),
         Column("device", "Device", lambda s: s.device, lambda s: (s.device.casefold(), s.start), 80, "center"),
+        Column("players", "Players", lambda s: str(s.players), lambda s: (s.players, s.start), 65, "center"),
+        Column("pass", "Pass", lambda s: fmt_duration(s.pass_minutes) if s.pass_id else "—",
+               lambda s: (s.pass_minutes, s.start), 70, "center"),
     ]
     if include_session_date:
         cols.append(Column("date", "Session date", lambda s: fmt_date(s.start_date), lambda s: s.start, 105, "center"))

@@ -12,6 +12,7 @@ from .dashboard_tab import DashboardTab
 from .entries_tab import PreviousEntriesTab
 from .entry_tab import SessionEntryTab
 from .mapping_tab import SessionMappingTab
+from .passes_tab import PassesTab
 
 APP_TITLE = "On Top Gaming — Session Manager"
 
@@ -40,11 +41,17 @@ class OnTopApp:
         self.notebook = ttk.Notebook(root)
         self.notebook.pack(fill="both", expand=True)
         self.dashboard = DashboardTab(self.notebook, self)
-        self.entry = SessionEntryTab(self.notebook, self)
+        self.entry_area = ttk.Frame(self.notebook)
+        self.entry_tabs = ttk.Notebook(self.entry_area, style="Sub.TNotebook")
+        self.entry_tabs.pack(fill="both", expand=True)
+        self.entry = SessionEntryTab(self.entry_tabs, self)
+        self.passes = PassesTab(self.entry_tabs, self)
+        self.entry_tabs.add(self.entry, text="New Session")
+        self.entry_tabs.add(self.passes, text="Monthly Passes")
         self.entries = PreviousEntriesTab(self.notebook, self)
         self.mapping = SessionMappingTab(self.notebook, self)
         self.notebook.add(self.dashboard, text="Dashboard")
-        self.notebook.add(self.entry, text="Session Entry")
+        self.notebook.add(self.entry_area, text="Session Entry")
         self.notebook.add(self.entries, text="Previous Entries")
         self.notebook.add(self.mapping, text="Session Mapping")
 
@@ -55,6 +62,7 @@ class OnTopApp:
         self.entry._show_mode_buttons()
         self.data_changed()
         self._tick_clock()
+        root.bind("<Destroy>", self._on_destroy, add="+")
         if store.load_error:
             root.after(300, self.show_load_error)
 
@@ -84,7 +92,12 @@ class OnTopApp:
     def _tick_clock(self):
         now = now_local()
         self.clock.configure(text=f"{fmt_datetime_long(now).rsplit(' (', 1)[0]}  ·  {fmt_offset(now)}")
-        self.root.after(15_000, self._tick_clock)
+        self._clock_job = self.root.after(15_000, self._tick_clock)
+
+    def _on_destroy(self, event):
+        if event.widget is self.root:
+            self.root.after_cancel(self._clock_job)
+            self.mapping.stop_timer()
 
     def show_load_error(self):
         messagebox.showerror(
@@ -99,14 +112,32 @@ class OnTopApp:
         self.status.configure(text=text)
 
     def current_tab(self):
-        return self.root.nametowidget(self.notebook.select())
+        """The visible page, looking inside the Session Entry sub-tabs."""
+        page = self.root.nametowidget(self.notebook.select())
+        if page is self.entry_area:
+            return self.root.nametowidget(self.entry_tabs.select())
+        return page
+
+    def show_entry_page(self, page: ttk.Frame):
+        self.notebook.select(self.entry_area)
+        self.entry_tabs.select(page)
 
     def data_changed(self):
         """Refresh every view after a successful write, keeping their filters."""
         self.entries.refresh()
+        self.passes.refresh()
+        self.entry.refresh_pass()
         self.mapping.refresh()
         self.dashboard.refresh()
 
     def edit_session(self, session_id: str):
         if self.entry.load_session(session_id):
-            self.notebook.select(self.entry)
+            self.show_entry_page(self.entry)
+
+    def open_pass_registration(self, phone: str = "", name: str = ""):
+        self.show_entry_page(self.passes)
+        self.passes.prefill(phone=phone, name=name)
+
+    def start_pass_session(self, p):
+        if self.entry.start_with_pass(p):
+            self.show_entry_page(self.entry)

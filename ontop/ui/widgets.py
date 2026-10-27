@@ -216,7 +216,7 @@ class DateEntry(ttk.Frame):
         self.on_pick = on_pick
         self.entry = ttk.Entry(self, textvariable=self.var, width=width)
         self.entry.pack(side="left", fill="x", expand=True)
-        self.button = ttk.Button(self, text="▾", width=3, style="Small.TButton", command=self.open_calendar)
+        self.button = ttk.Button(self, text="▼", width=3, style="Small.TButton", command=self.open_calendar)
         self.button.pack(side="left", padx=(4, 0))
         Tooltip(self.button, "Pick a date from the calendar")
 

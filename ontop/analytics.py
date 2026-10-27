@@ -11,8 +11,17 @@ from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
 from typing import Iterable, Sequence
 
+from .config import CLOSING_TIME, OPENING_TIME
 from .formatting import local_datetime
-from .models import DEVICES, PAYMENT_METHODS, PAYMENT_STATUSES, Session, customer_key, normalise_name
+from .models import (
+    DEVICES,
+    PAYMENT_METHODS,
+    PAYMENT_STATUSES,
+    MonthlyPass,
+    Session,
+    customer_key,
+    normalise_name,
+)
 
 PRESET_TODAY = "Today"
 PRESET_YESTERDAY = "Yesterday"
@@ -98,6 +107,8 @@ class Summary:
     total_paise: int
     paid_paise: int
     balance_paise: int
+    pass_sessions: int = 0
+    pass_minutes: int = 0
 
     @property
     def average_minutes(self) -> float:
@@ -117,6 +128,8 @@ def summarize(sessions: Sequence[Session]) -> Summary:
         total_paise=sum(s.total_paise for s in sessions),
         paid_paise=sum(s.paid_paise for s in sessions),
         balance_paise=sum(s.balance_paise for s in sessions),
+        pass_sessions=sum(1 for s in sessions if s.pass_id),
+        pass_minutes=sum(s.pass_minutes for s in sessions),
     )
 
 
@@ -264,6 +277,38 @@ def sessions_on_day(sessions: Iterable[Session], d: date) -> list[Session]:
     day_start, day_end = day_bounds(d)
     rows = [s for s in sessions if s.start < day_end and s.end > day_start]
     return sorted(rows, key=lambda s: s.start)
+
+
+def timeline_hours(d: date, sessions: Iterable[Session]) -> tuple[int, int]:
+    """First and last hour to show: opening hours, widened for any session outside them."""
+    first = OPENING_TIME.hour
+    last = CLOSING_TIME.hour + (1 if CLOSING_TIME.minute else 0)
+    day_start, day_end = day_bounds(d)
+    for s in sessions:
+        lo = max(s.start, day_start).astimezone()
+        hi = min(s.end, day_end).astimezone()
+        if hi <= lo:
+            continue
+        first = min(first, lo.hour)
+        last = max(last, 24 if hi >= day_end else hi.hour + (1 if (hi.minute or hi.second) else 0))
+    return first, last
+
+
+def hour_moment(d: date, hour: int) -> datetime:
+    return day_bounds(d)[1] if hour >= 24 else local_datetime(d, time(hour, 0))
+
+
+def passes_sold(passes: Iterable[MonthlyPass], start: date | None, end: date | None, method: str | None = None,
+                search: str = "") -> list[MonthlyPass]:
+    """Passes purchased in the inclusive date range (by purchase date)."""
+    needle = normalise_name(search).casefold()
+    return [
+        p for p in passes
+        if (start is None or p.purchased_on >= start)
+        and (end is None or p.purchased_on <= end)
+        and (not method or p.payment_method == method)
+        and (not needle or needle in p.holder_name.casefold() or needle in p.phone)
+    ]
 
 
 def bar_span(start: datetime, end: datetime, day_start: datetime, day_end: datetime) -> tuple[float, float] | None:
