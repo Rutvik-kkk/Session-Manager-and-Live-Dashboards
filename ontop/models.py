@@ -49,6 +49,7 @@ PASS_STATES: tuple[str, ...] = (PASS_ACTIVE, PASS_USED_UP, PASS_EXPIRED, PASS_NO
 # Structural limit applied to every stored record; opening hours further limit new sessions.
 MAX_DURATION_MINUTES = 24 * 60
 MAX_NAME_LENGTH = 80
+MAX_NOTES_LENGTH = 500
 
 
 class ValidationError(Exception):
@@ -121,6 +122,7 @@ class Session:
     extensions: list[Extension] = field(default_factory=list)
     players: int = 1
     pass_id: str | None = None
+    notes: str = ""
 
     @property
     def duration_minutes(self) -> int:
@@ -168,6 +170,9 @@ class Session:
             errors.append(player_error)
         if self.pass_id is not None and (not isinstance(self.pass_id, str) or not self.pass_id.strip()):
             errors.append("invalid pass id")
+        notes_error = notes_problem(self.notes)
+        if notes_error:
+            errors.append(notes_error)
         if self.payment_method not in PAYMENT_METHODS:
             errors.append(f"unknown payment method '{self.payment_method}'")
         duration_error = duration_problem(self.start, self.end)
@@ -195,6 +200,7 @@ class Session:
             "entry_time": to_iso(self.entry_time),
             "last_updated": to_iso(self.last_updated),
             "extension_history": [ext.to_dict() for ext in self.extensions],
+            "notes": self.notes,
         }
 
     @classmethod
@@ -217,6 +223,9 @@ class Session:
         end = reader.timestamp("end")
         entry_time = reader.timestamp("entry_time")
         last_updated = reader.timestamp("last_updated")
+        notes = data.get("notes", "")
+        if not isinstance(notes, str):
+            reader.errors.append("'notes' must be text")
 
         extensions: list[Extension] = []
         history = data.get("extension_history", None)
@@ -247,6 +256,7 @@ class Session:
             extensions=extensions,
             players=players,
             pass_id=pass_id,
+            notes=notes,
         )
         problems = session.problems()
         if not problems and stored_duration != session.duration_minutes:
@@ -424,6 +434,20 @@ def name_problem(name: object) -> str | None:
         return "Customer name is required."
     if len(normalise_name(name)) > MAX_NAME_LENGTH:
         return f"Customer name must be at most {MAX_NAME_LENGTH} characters."
+    return None
+
+
+def normalise_notes(text: str) -> str:
+    """Trim the note and its lines; line breaks are kept."""
+    lines = [line.rstrip() for line in (text or "").replace("\r\n", "\n").split("\n")]
+    return "\n".join(lines).strip()
+
+
+def notes_problem(notes: object) -> str | None:
+    if not isinstance(notes, str):
+        return "Note must be text."
+    if len(notes) > MAX_NOTES_LENGTH:
+        return f"Note must be at most {MAX_NOTES_LENGTH} characters (currently {len(notes)})."
     return None
 
 
@@ -729,6 +753,7 @@ def prepare_session(
     new_extensions: Sequence[Extension] = (),
     monthly_pass: MonthlyPass | None = None,
     pass_used_by_others: int = 0,
+    notes_text: str = "",
 ) -> Session:
     """Validate raw form values and return a ready-to-store Session.
 
@@ -778,6 +803,11 @@ def prepare_session(
     elif payment_status not in PAYMENT_STATUSES:
         errors.append("Select a payment status (Paid, Unpaid or Partially Paid).")
 
+    notes = normalise_notes(notes_text)
+    problem = notes_problem(notes)
+    if problem:
+        errors.append(problem)
+
     if errors:
         raise ValidationError(errors)
 
@@ -798,6 +828,7 @@ def prepare_session(
             extensions=list(existing.extensions) + list(new_extensions),
             players=players,
             pass_id=pass_id,
+            notes=notes,
         )
     return Session(
         id=str(uuid.uuid4()),
@@ -814,4 +845,5 @@ def prepare_session(
         extensions=list(new_extensions),
         players=players,
         pass_id=pass_id,
+        notes=notes,
     )

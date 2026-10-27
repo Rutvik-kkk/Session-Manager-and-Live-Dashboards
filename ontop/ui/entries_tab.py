@@ -47,6 +47,8 @@ def session_columns(include_session_date: bool = True, include_end: bool = True,
     ]
     if include_entry:
         cols.append(Column("entry", "Entry time", lambda s: fmt_datetime(s.entry_time), lambda s: s.entry_time, 140, "center"))
+    cols.append(Column("notes", "Note", lambda s: " ⏎ ".join(s.notes.splitlines()),
+                       lambda s: (s.notes == "", s.notes.casefold()), 220))
     return cols
 
 

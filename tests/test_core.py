@@ -40,13 +40,13 @@ NOW = local_datetime(DAY, time(12, 0))
 
 def make(name="Asha", device="PS5(X)", day=DAY, start="18:00", end="19:00", players=1, total="200",
          paid="200", status=None, method="Cash", now=NOW, existing=None, extensions=(), monthly_pass=None,
-         used=0):
+         used=0, notes=""):
     total_p, paid_p = parse_money(total), parse_money(paid)
     return prepare_session(
         customer_name=name, device=device, players=players, date_text=day.isoformat(), start_text=start,
         end_text=end, payment_method=method, total_text=total, paid_text=paid,
         payment_status=status or suggest_status(total_p, paid_p), now=now, existing=existing,
-        new_extensions=extensions, monthly_pass=monthly_pass, pass_used_by_others=used,
+        new_extensions=extensions, monthly_pass=monthly_pass, pass_used_by_others=used, notes_text=notes,
     )
 
 
@@ -90,9 +90,9 @@ class PricingTests(unittest.TestCase):
         self.assertEqual(suggested_charge("PS4", 3, 60), 18000)
         self.assertEqual(suggested_charge("PS4", 4, 60), 24000)
 
-    def test_half_hour_is_70_percent(self):
-        self.assertEqual(suggested_charge("PS5(X)", 1, 30), 5600)
-        self.assertEqual(suggested_charge("PS4", 1, 20), 4200)
+    def test_half_hour_prices(self):
+        self.assertEqual(suggested_charge("PS5(X)", 1, 30), 5500)
+        self.assertEqual(suggested_charge("PS4", 1, 20), 4000)
 
     def test_longer_sessions(self):
         self.assertEqual(suggested_charge("PS5(X)", 1, 90), 12000)
@@ -483,6 +483,22 @@ class RecordTests(unittest.TestCase):
         rec["players"] = 7
         with self.assertRaisesRegex(ValueError, "players"):
             Session.from_dict(rec)
+
+    def test_notes(self):
+        s = make(notes="  Wants PS5(X) next time  \r\n\r\nPaid by friend  ")
+        self.assertEqual(s.notes, "Wants PS5(X) next time\n\nPaid by friend")
+        self.assertEqual(Session.from_dict(s.to_dict()).notes, s.notes)
+        self.assertEqual(make(notes="   ").notes, "")
+        rec = make().to_dict()
+        del rec["notes"]
+        self.assertEqual(Session.from_dict(rec).notes, "")
+        rec["notes"] = 5
+        with self.assertRaisesRegex(ValueError, "notes"):
+            Session.from_dict(rec)
+        with self.assertRaisesRegex(ValidationError, "at most 500"):
+            make(notes="x" * 501)
+        edited = make(notes="new note", existing=s, now=NOW + timedelta(minutes=5))
+        self.assertEqual((edited.id, edited.notes), (s.id, "new note"))
 
     def test_pass_round_trip(self):
         p = make_pass()

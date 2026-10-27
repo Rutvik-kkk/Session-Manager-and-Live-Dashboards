@@ -27,8 +27,8 @@ HOURLY_RATES_PAISE = {
 
 # Time is billed in 30-minute blocks, rounded up.
 BILLING_BLOCK_MINUTES = 30
-# A 30-minute session (1 player only) costs this share of the 1-hour price.
-HALF_HOUR_PERCENT = 70
+# Fixed price of a 30-minute session (1 player only).
+HALF_HOUR_PRICES_PAISE = {"PS5": 55_00, "PS4": 40_00}
 # Sessions with 2 or more players must be booked for at least this long.
 MIN_MULTIPLAYER_MINUTES = 60
 

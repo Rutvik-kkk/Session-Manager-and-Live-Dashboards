@@ -93,9 +93,12 @@ class SessionDetailsDialog(tk.Toplevel):
             ("Entry time", fmt_datetime_long(session.entry_time)),
             ("Last updated", fmt_datetime_long(session.last_updated)),
         ]
+        if session.notes:
+            rows.append(("Note", session.notes))
         for r, (label, value) in enumerate(rows):
-            ttk.Label(grid, text=label, style="CardMuted.TLabel").grid(row=r, column=0, sticky="w", padx=(0, 18), pady=2)
-            ttk.Label(grid, text=value, style="Card.TLabel").grid(row=r, column=1, sticky="w", pady=2)
+            ttk.Label(grid, text=label, style="CardMuted.TLabel").grid(row=r, column=0, sticky="nw", padx=(0, 18), pady=2)
+            ttk.Label(grid, text=value, style="Card.TLabel", wraplength=380, justify="left").grid(
+                row=r, column=1, sticky="w", pady=2)
 
         ttk.Label(body, text="Extension history", style="CardMuted.TLabel").pack(anchor="w", pady=(14, 2))
         if session.extensions:

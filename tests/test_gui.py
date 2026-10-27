@@ -116,7 +116,10 @@ class GuiWorkflowTests(unittest.TestCase):
         self.assertEqual(e.total_var.get(), "180.00")
         e.players_var.set("1")
         e.end_var.set("10:30")
-        self.assertEqual(e.total_var.get(), "42.00")
+        self.assertEqual(e.total_var.get(), "40.00")
+        e.device_var.set("PS5(X)")
+        self.assertEqual(e.total_var.get(), "55.00")
+        e.device_var.set("PS4")
         e.players_var.set("3")
         self.assertIn("at least 1h", e.price_label.cget("text"))
         e.players_var.set("1")
@@ -147,6 +150,9 @@ class GuiWorkflowTests(unittest.TestCase):
     def test_save_edit_update_preserves_entry_time(self):
         e = self.e
         self.fill(players=2, paid="0")
+        e.notes_text.insert("1.0", "Birthday group\nBring extra controller ")
+        self.pump()
+        self.assertEqual(e.notes_count.cget("text"), "37/500")
         e.save()
         self.assertTrue(self.info.called, self.error.call_args)
         self.pump()
@@ -154,12 +160,16 @@ class GuiWorkflowTests(unittest.TestCase):
         self.assertEqual(len(rows), 1)
         sid, entry_time = rows[0]["id"], rows[0]["entry_time"]
         self.assertEqual((rows[0]["players"], rows[0]["total_charge_paise"]), (2, 18000))
+        self.assertEqual(rows[0]["notes"], "Birthday group\nBring extra controller")
         self.assertEqual(self.app.entries.table.displayed_ids(), [sid])
+        self.assertEqual(e._notes(), "")
 
         self.app.entries.search_var.set("ash")
         self.app.edit_session(sid)
         self.assertIs(self.app.current_tab(), e)
         self.assertEqual(e.update_btn.winfo_manager(), "pack")
+        self.assertEqual(e._notes(), "Birthday group\nBring extra controller")
+        e.notes_text.insert("end", " (done)")
         e.paid_var.set("100")
         e.update()
         self.pump()
@@ -167,6 +177,7 @@ class GuiWorkflowTests(unittest.TestCase):
         self.assertEqual(len(rows), 1)
         self.assertEqual((rows[0]["id"], rows[0]["entry_time"]), (sid, entry_time))
         self.assertEqual(rows[0]["payment_status"], "Partially Paid")
+        self.assertEqual(rows[0]["notes"], "Birthday group\nBring extra controller (done)")
         self.assertEqual(self.app.entries.search_var.get(), "ash")
 
     def test_extension_cancel_then_commit_updates_price(self):

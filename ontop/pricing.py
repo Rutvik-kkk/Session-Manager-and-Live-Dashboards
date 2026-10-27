@@ -5,7 +5,7 @@ from __future__ import annotations
 from .config import (
     BILLING_BLOCK_MINUTES,
     DEVICE_PRICE_GROUP,
-    HALF_HOUR_PERCENT,
+    HALF_HOUR_PRICES_PAISE,
     HOURLY_RATES_PAISE,
     MIN_MULTIPLAYER_MINUTES,
     PLAYER_COUNTS,
@@ -36,10 +36,10 @@ def players_problem(players: object, duration_minutes: int | None = None) -> str
     return None
 
 
-def _charge_for(rate_paise: int, billed: int) -> int:
-    if billed == BILLING_BLOCK_MINUTES:
-        return (rate_paise * HALF_HOUR_PERCENT + 50) // 100
-    return rate_paise * billed // 60
+def _charge_for(device: str, players: int, billed: int) -> int:
+    if billed == BILLING_BLOCK_MINUTES and players == 1:
+        return HALF_HOUR_PRICES_PAISE[DEVICE_PRICE_GROUP[device]]
+    return hourly_rate(device, players) * billed // 60
 
 
 def suggested_charge(device: str, players: int, duration_minutes: int, on_pass: bool = False) -> int:
@@ -47,18 +47,18 @@ def suggested_charge(device: str, players: int, duration_minutes: int, on_pass: 
     billed = billable_minutes(duration_minutes)
     if billed == 0:
         return 0
-    full = _charge_for(hourly_rate(device, players), billed)
+    full = _charge_for(device, players, billed)
     if not on_pass:
         return full
-    return full - _charge_for(hourly_rate(device, 1), billed)
+    return full - _charge_for(device, 1, billed)
 
 
 def charge_explanation(device: str, players: int, duration_minutes: int, on_pass: bool = False) -> str:
     billed = billable_minutes(duration_minutes)
     rate = hourly_rate(device, players)
     who = f"{players} player{'s' if players != 1 else ''}"
-    if billed == BILLING_BLOCK_MINUTES:
-        basis = f"30 min at {HALF_HOUR_PERCENT}% of {fmt_money(rate)}/h"
+    if billed == BILLING_BLOCK_MINUTES and players == 1:
+        basis = f"30 min at {fmt_money(HALF_HOUR_PRICES_PAISE[DEVICE_PRICE_GROUP[device]])}"
     else:
         basis = f"{fmt_duration(billed)} × {fmt_money(rate)}/h"
     text = f"{DEVICE_PRICE_GROUP[device]} · {who} · {basis}"

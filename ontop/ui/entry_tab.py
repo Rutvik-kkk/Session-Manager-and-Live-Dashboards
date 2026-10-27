@@ -25,6 +25,7 @@ from ..formatting import (
     to_local,
 )
 from ..models import (
+    MAX_NOTES_LENGTH,
     PAYMENT_METHODS,
     PAYMENT_STATUSES,
     ConflictError,
@@ -41,6 +42,7 @@ from ..models import (
     find_conflicts,
     fmt_phone,
     max_minutes_until_close,
+    normalise_notes,
     normalise_phone,
     opening_hours_text,
     pass_session_problems,
@@ -132,6 +134,7 @@ class SessionEntryTab(ttk.Frame):
 
         self._build_customer(self.left)
         self._build_timing(self.left)
+        self._build_notes(self.left)
         self._build_payment(self.right)
         self._build_extend(self.right)
         self._build_actions(body)
@@ -236,6 +239,48 @@ class SessionEntryTab(ttk.Frame):
         self.span_label.grid(row=6, column=0, columnspan=4, sticky="w", pady=(10, 0))
         self.timing_error = ttk.Label(f, style="CardError.TLabel", wraplength=520, justify="left")
         self.timing_error.grid(row=7, column=0, columnspan=4, sticky="w", pady=(4, 0))
+
+    def _build_notes(self, parent):
+        f = self._section(parent, "Note", "Optional — anything worth remembering about this session.")
+        self.notes_text = tk.Text(
+            f, height=3, wrap="word", undo=True, font=theme.FONTS["base"],
+            background=theme.SURFACE_2, foreground=theme.TEXT, insertbackground=theme.TEXT,
+            selectbackground=theme.ACCENT_DIM, selectforeground=theme.TEXT, relief="flat",
+            highlightthickness=1, highlightbackground=theme.BORDER, highlightcolor=theme.ACCENT,
+            padx=8, pady=6,
+        )
+        self.notes_text.grid(row=2, column=0, columnspan=4, sticky="ew", pady=(8, 0))
+        self.notes_count = ttk.Label(f, style="CardSmall.TLabel")
+        self.notes_count.grid(row=3, column=0, columnspan=4, sticky="e", pady=(4, 0))
+        self.notes_text.bind("<<Modified>>", self._on_notes_modified)
+        self.notes_text.bind("<Tab>", self._focus_next)
+        self.notes_text.bind("<Shift-Tab>", self._focus_prev)
+
+    @staticmethod
+    def _focus_next(event):
+        event.widget.tk_focusNext().focus_set()
+        return "break"
+
+    @staticmethod
+    def _focus_prev(event):
+        event.widget.tk_focusPrev().focus_set()
+        return "break"
+
+    def _on_notes_modified(self, _event=None):
+        self.notes_text.edit_modified(False)
+        length = len(normalise_notes(self.notes_text.get("1.0", "end-1c")))
+        over = length > MAX_NOTES_LENGTH
+        self.notes_count.configure(text=f"{length}/{MAX_NOTES_LENGTH}",
+                                   style="CardError.TLabel" if over else "CardSmall.TLabel")
+
+    def _notes(self) -> str:
+        return self.notes_text.get("1.0", "end-1c")
+
+    def _set_notes(self, text: str):
+        self.notes_text.delete("1.0", "end")
+        self.notes_text.insert("1.0", text)
+        self.notes_text.edit_reset()
+        self._on_notes_modified()
 
     def _build_payment(self, parent):
         f = self._section(parent, "Payment",
@@ -393,6 +438,7 @@ class SessionEntryTab(ttk.Frame):
             self.status_var.set("")
         finally:
             self._syncing = False
+        self._set_notes("")
         self.extend_msg.configure(text="", style="CardMuted.TLabel")
         self._recalc_from_times()
         self._render_history()
@@ -400,7 +446,7 @@ class SessionEntryTab(ttk.Frame):
         self.name_entry.focus_set()
 
     def _confirm_clear(self):
-        if self.name_var.get().strip() or self.phone_var.get().strip():
+        if self.name_var.get().strip() or self.phone_var.get().strip() or self._notes().strip():
             if not messagebox.askyesno("Clear form", "Clear all fields in this form?", parent=self):
                 return
         self.clear_form()
@@ -446,6 +492,7 @@ class SessionEntryTab(ttk.Frame):
             self.status_var.set(session.payment_status)
         finally:
             self._syncing = False
+        self._set_notes(session.notes)
         self.extend_msg.configure(text="", style="CardMuted.TLabel")
         try:
             span = self._current_times()
@@ -880,6 +927,7 @@ class SessionEntryTab(ttk.Frame):
             new_extensions=self._pending,
             monthly_pass=monthly_pass,
             pass_used_by_others=used,
+            notes_text=self._notes(),
         )
 
     def _persist(self, updating: bool) -> Session | None:
@@ -919,6 +967,8 @@ class SessionEntryTab(ttk.Frame):
             left = p.included_minutes - self.app.store.pass_used_minutes(p.id)
             text += (f"\nMonthly pass: {fmt_duration(session.pass_minutes)} used, "
                      f"{fmt_duration(max(left, 0))} left")
+        if session.notes:
+            text += f"\nNote: {session.notes}"
         return text
 
     def save(self):

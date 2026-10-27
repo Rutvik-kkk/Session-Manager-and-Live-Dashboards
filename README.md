@@ -41,7 +41,7 @@ All of these live in `ontop/config.py`; change them there.
   | 4 | ₹380 | ₹240 |
 
 - Time is billed in 30-minute blocks, rounded up (e.g. 1h 10m is billed as 1h 30m).
-  A half-hour block costs 70% of the 1-player hourly rate (₹56 on PS5, ₹42 on PS4).
+  A 30-minute session costs ₹55 on PS5 and ₹40 on PS4.
 - Half-hour sessions are for 1 player only; 2–4 player sessions must be at least 1 hour.
 - The payment amount is filled in from the price list and follows changes to device, players, duration
   and extensions. You can type a different amount; **Use price list** switches back.
@@ -71,13 +71,14 @@ All of these live in `ontop/config.py`; change them there.
 
 - Inputs: dates `YYYY-MM-DD`, times 24-hour `HH:MM`, in the computer's local timezone.
 - Stored timestamps are ISO 8601 with a UTC offset, e.g. `2026-10-27T21:30:00+05:30`.
-- Each session stores `start`, `end`, `duration_minutes`, `players`, `pass_id`, `entry_time` (first
+- Each session stores `start`, `end`, `duration_minutes`, `players`, `pass_id`, `notes`, `entry_time` (first
   successful save, never changed), `last_updated` and `extension_history`.
 
 ## Using the app
 
 **Session Entry → New Session**: enter the customer, device, number of players, date and start time, then
-either the end time or the duration; the other one updates automatically. For a pass holder, tick
+either the end time or the duration; the other one updates automatically. An optional **Note** (up to
+500 characters) is saved with the session and shown in Previous Entries and the timeline details. For a pass holder, tick
 **Monthly pass holder** and enter their phone number: the name is filled in and the time left is shown.
 **Register new pass** jumps to the pass form. The payment status is suggested from the amounts, and a
 conflicting manual choice is blocked. Use **Extend** or **+15 / +30 / +60 min** to add time (checked
