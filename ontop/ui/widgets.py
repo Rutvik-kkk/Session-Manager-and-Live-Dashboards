@@ -315,8 +315,9 @@ class SortableTree(ttk.Frame):
         self.tree.delete(*self.tree.get_children())
         for i, item in enumerate(ordered):
             tags = ["even" if i % 2 else "odd"]
-            if self.tag_of:
-                tags.append(self.tag_of(item))
+            extra = self.tag_of(item) if self.tag_of else ""
+            if extra:
+                tags.append(extra)
             iid = self.id_of(item)
             self.tree.insert("", "end", iid=iid, values=[self.columns[k].value(item) for k in self.order], tags=tags)
         if selected and self.tree.exists(selected):

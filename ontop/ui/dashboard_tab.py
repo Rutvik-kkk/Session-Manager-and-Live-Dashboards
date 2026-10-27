@@ -53,7 +53,7 @@ from ..formatting import (  # noqa: E402
 )
 from ..models import DEVICES, PAYMENT_METHODS, PAYMENT_STATUSES, Session  # noqa: E402
 from . import theme  # noqa: E402
-from .entries_tab import session_columns  # noqa: E402
+from .entries_tab import session_columns, status_tag  # noqa: E402
 from .widgets import DateEntry, ScrollableFrame, SortableTree, Tooltip, card  # noqa: E402
 
 if TYPE_CHECKING:
@@ -230,7 +230,7 @@ class DashboardTab(ttk.Frame):
         cols += [base["balance"], dataclasses.replace(base["method"], heading="Payment method"),
                  dataclasses.replace(base["status"], heading="Payment status")]
         self.table = SortableTree(inner, cols, sort_column="start", descending=True, height=12,
-                                  tag_of=lambda s: s.payment_status)
+                                  tag_of=status_tag)
         self.table.pack(fill="both", expand=True)
         self.table.tree.bind("<Double-1>", self._on_table_double)
         self.table_empty = ttk.Label(inner, style="CardMuted.TLabel")
@@ -491,7 +491,7 @@ class DashboardTab(ttk.Frame):
 
     @staticmethod
     def _legend(ax):
-        leg = ax.legend(loc="upper left", frameon=True, fontsize=8.5)
+        leg = ax.legend(loc="lower left", bbox_to_anchor=(0, 1.0), ncol=2, frameon=True, fontsize=8.5)
         leg.get_frame().set_facecolor(theme.SURFACE_2)
         leg.get_frame().set_edgecolor(theme.BORDER)
         for text in leg.get_texts():

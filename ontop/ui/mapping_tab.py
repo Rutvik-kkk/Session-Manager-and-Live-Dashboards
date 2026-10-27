@@ -32,7 +32,7 @@ LABEL_W = 120
 MARGIN = 14
 MIN_HOUR_W = 64
 MIN_LANE_H = 64
-MAX_LANE_H = 120
+MAX_LANE_H = 160
 
 
 def fit_text(font, text: str, width: float) -> str:

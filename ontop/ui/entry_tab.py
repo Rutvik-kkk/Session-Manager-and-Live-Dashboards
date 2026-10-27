@@ -148,7 +148,7 @@ class SessionEntryTab(ttk.Frame):
         ttk.Label(inner, text=title, style="CardSection.TLabel").grid(row=0, column=0, columnspan=4, sticky="w")
         if hint:
             ttk.Label(inner, text=hint, style="CardSmall.TLabel").grid(row=1, column=0, columnspan=4, sticky="w", pady=(2, 0))
-        inner.columnconfigure(1, weight=1)
+        inner.columnconfigure(3, weight=1)
         return inner
 
     def _field_label(self, parent, text: str, row: int, required: bool = False):

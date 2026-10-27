@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 
 from ..analytics import SessionFilter, filter_sessions, summarize
 from ..formatting import fmt_date, fmt_datetime, fmt_duration, fmt_money, parse_date
-from ..models import DEVICES, PAYMENT_STATUSES
+from ..models import DEVICES, PAYMENT_STATUSES, STATUS_PAID, Session
 from .widgets import Column, DateEntry, SortableTree, Tooltip, card
 
 if TYPE_CHECKING:
@@ -16,6 +16,11 @@ if TYPE_CHECKING:
 
 ALL_DEVICES = "All Devices"
 ALL_STATUSES = "All Statuses"
+
+
+def status_tag(s: Session) -> str:
+    """Only rows that still need money collected are colour-highlighted."""
+    return "" if s.payment_status == STATUS_PAID else s.payment_status
 
 
 def session_columns(include_session_date: bool = True, include_end: bool = True,
@@ -91,7 +96,7 @@ class PreviousEntriesTab(ttk.Frame):
         outer, inner = card(self, padding=0)
         outer.pack(fill="both", expand=True)
         self.table = SortableTree(inner, session_columns(), sort_column="entry", descending=True, height=18,
-                                  tag_of=lambda s: s.payment_status)
+                                  tag_of=status_tag)
         self.table.pack(fill="both", expand=True)
         self.table.tree.bind("<Double-1>", self._on_double_click)
         self.table.tree.bind("<Return>", lambda e: self.edit_selected())
