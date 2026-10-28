@@ -6,6 +6,7 @@ chosen with set_palette() before the window is built.
 
 from __future__ import annotations
 
+import colorsys
 import tkinter as tk
 from tkinter import font as tkfont
 from tkinter import ttk
@@ -20,37 +21,74 @@ _MIDNIGHT = {
     "ROW_ALT": "#1a2130", "GRID_MINOR": "#1f2838", "NOW_LINE": "#f8fafc", "BAR_TEXT": "#0b0f17",
     "BANNER_BG": "#3a1518", "BANNER_FG": "#fecaca",
     "DANGER_BG": "#4a1d22", "DANGER_ACTIVE": "#5f2328", "DANGER_FG": "#fecaca", "DANGER_BORDER": "#7f1d1d",
+    "DEVICE_1": "#7c6cff", "DEVICE_2": "#38bdf8", "DEVICE_3": "#f472b6",
 }
+
+# Paid / Unpaid / Partially paid colours shared by every palette below.
+_STATUS = {"SUCCESS": "#4ade80", "DANGER": "#fb7185", "WARNING": "#fbbf24"}
+
+
+def _rgb(color: str) -> tuple[int, int, int]:
+    return int(color[1:3], 16), int(color[3:5], 16), int(color[5:7], 16)
+
+
+def _mix(a: str, b: str, t: float) -> str:
+    """``t`` of the way from colour ``a`` to colour ``b``."""
+    return "#" + "".join(f"{round(x + (y - x) * t):02x}" for x, y in zip(_rgb(a), _rgb(b)))
+
+
+def _luminance(color: str) -> float:
+    r, g, b = (c / 255 for c in _rgb(color))
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b
+
+
+def _hue(color: str) -> float:
+    return colorsys.rgb_to_hls(*(c / 255 for c in _rgb(color)))[0]
+
+
+def _distinct_from(base: str, *others: str) -> str:
+    """``base`` re-hued as far as possible from every hue in ``others``."""
+    _, lightness, s = colorsys.rgb_to_hls(*(c / 255 for c in _rgb(base)))
+    taken = [_hue(c) for c in others]
+
+    def gap(h: float) -> float:
+        return min(min(abs(h - t), 1 - abs(h - t)) for t in taken)
+
+    hue = max((i / 36 for i in range(36)), key=gap)
+    r, g, b = colorsys.hls_to_rgb(hue, max(lightness, 0.55), max(s, 0.6))
+    return "#" + "".join(f"{round(c * 255):02x}" for c in (r, g, b))
+
+
+def _palette(bg: str, surface: str, text: str, accent: str, info: str) -> dict[str, str]:
+    """A full scheme built from five base colours plus the shared status colours."""
+    danger = _STATUS["DANGER"]
+    return {
+        "BG": bg, "SURFACE": surface, "TEXT": text, "ACCENT": accent, "INFO": info, **_STATUS,
+        "SURFACE_2": _mix(surface, text, 0.06), "SURFACE_3": _mix(surface, text, 0.12),
+        "BORDER": _mix(surface, text, 0.16), "MUTED": _mix(text, surface, 0.38),
+        "DISABLED": _mix(text, surface, 0.62),
+        "ACCENT_HOVER": _mix(accent, "#ffffff", 0.18), "ACCENT_DIM": _mix(accent, surface, 0.6),
+        "ON_ACCENT": _mix(bg, "#000000", 0.4) if _luminance(accent) > 0.55 else "#ffffff",
+        "ROW_ALT": _mix(surface, text, 0.03), "GRID_MINOR": _mix(surface, text, 0.06),
+        "NOW_LINE": text, "BAR_TEXT": _mix(bg, "#000000", 0.4),
+        "BANNER_BG": _mix(surface, danger, 0.22), "BANNER_FG": _mix(text, danger, 0.25),
+        "DANGER_BG": _mix(surface, danger, 0.2), "DANGER_ACTIVE": _mix(surface, danger, 0.3),
+        "DANGER_FG": _mix(text, danger, 0.3), "DANGER_BORDER": _mix(surface, danger, 0.5),
+        "DEVICE_1": accent, "DEVICE_2": info, "DEVICE_3": _distinct_from(accent, accent, info, *_STATUS.values()),
+    }
+
 
 PALETTES: dict[str, dict[str, str]] = {
     "Midnight": _MIDNIGHT,
-    "Ocean": _MIDNIGHT | {
-        "BG": "#0b1520", "SURFACE": "#112130", "SURFACE_2": "#182c3f", "SURFACE_3": "#21384f",
-        "BORDER": "#26405a", "MUTED": "#94a9bd", "DISABLED": "#56708a",
-        "ACCENT": "#0ea5e9", "ACCENT_HOVER": "#38bdf8", "ACCENT_DIM": "#0c4a6e", "INFO": "#a78bfa",
-        "ROW_ALT": "#14273a", "GRID_MINOR": "#1a3044",
-    },
-    "Emerald": _MIDNIGHT | {
-        "BG": "#0b1411", "SURFACE": "#111f1a", "SURFACE_2": "#182b24", "SURFACE_3": "#21382f",
-        "BORDER": "#264237", "MUTED": "#95b3a6", "DISABLED": "#587567",
-        "ACCENT": "#10b981", "ACCENT_HOVER": "#34d399", "ACCENT_DIM": "#065f46", "SUCCESS": "#84cc16",
-        "ROW_ALT": "#14241e", "GRID_MINOR": "#1a2f27",
-    },
-    "Sunset": _MIDNIGHT | {
-        "BG": "#16100e", "SURFACE": "#201815", "SURFACE_2": "#2c211d", "SURFACE_3": "#3a2c26",
-        "BORDER": "#47362f", "MUTED": "#bba79e", "DISABLED": "#7a665d",
-        "ACCENT": "#f97316", "ACCENT_HOVER": "#fb923c", "ACCENT_DIM": "#7c2d12", "WARNING": "#facc15",
-        "ROW_ALT": "#261d19", "GRID_MINOR": "#2e231f",
-    },
-    "Light": {
-        "BG": "#eef1f6", "SURFACE": "#ffffff", "SURFACE_2": "#f1f4f9", "SURFACE_3": "#e2e8f0",
-        "BORDER": "#cbd5e1", "TEXT": "#111827", "MUTED": "#5b6474", "DISABLED": "#a0a8b6",
-        "ACCENT": "#6d5dfc", "ACCENT_HOVER": "#5b4bf0", "ACCENT_DIM": "#8b7dfd", "ON_ACCENT": "#ffffff",
-        "SUCCESS": "#16a34a", "DANGER": "#dc2626", "WARNING": "#d97706", "INFO": "#0284c7",
-        "ROW_ALT": "#f6f8fb", "GRID_MINOR": "#e5e9f0", "NOW_LINE": "#111827", "BAR_TEXT": "#ffffff",
-        "BANNER_BG": "#fee2e2", "BANNER_FG": "#7f1d1d",
-        "DANGER_BG": "#fee2e2", "DANGER_ACTIVE": "#fecaca", "DANGER_FG": "#991b1b", "DANGER_BORDER": "#fca5a5",
-    },
+    "Koi Ember": _palette("#0a0f12", "#20292d", "#f0e6df", "#f07844", "#79c4d4"),
+    "Crimson Forest": _palette("#081919", "#223330", "#eeede7", "#f05252", "#7ec8d5"),
+    "Indigo Silk": _palette("#0a1123", "#242744", "#eef0fa", "#8387c3", "#9ebef5"),
+    "Saffron Grove": _palette("#181d19", "#2c263f", "#f5eedd", "#f8c662", "#a9b9f0"),
+    "Electric Plum": _palette("#1d0c13", "#35152d", "#edede8", "#a78bfa", "#c5f9fc"),
+    "Whiskey Lounge": _palette("#150c0c", "#34150f", "#eaceaa", "#d39858", "#8fc4d4"),
+    "Lilac Mist": _palette("#2a193d", "#2f2c5e", "#f0eaf5", "#b494d4", "#97c2c5"),
+    "Neon Alley": _palette("#021826", "#07343b", "#e6fff4", "#06f284", "#64ddf0"),
+    "Cyber Aqua": _palette("#101f30", "#1a334a", "#e8f8fc", "#27e6ec", "#a7aced"),
 }
 THEME_NAMES = tuple(PALETTES)
 CURRENT_THEME = "Midnight"
@@ -58,9 +96,9 @@ CURRENT_THEME = "Midnight"
 BG = SURFACE = SURFACE_2 = SURFACE_3 = BORDER = TEXT = MUTED = DISABLED = ""
 ACCENT = ACCENT_HOVER = ACCENT_DIM = ON_ACCENT = SUCCESS = DANGER = WARNING = INFO = ""
 ROW_ALT = GRID_MINOR = NOW_LINE = BAR_TEXT = BANNER_BG = BANNER_FG = ""
-DANGER_BG = DANGER_ACTIVE = DANGER_FG = DANGER_BORDER = ""
+DANGER_BG = DANGER_ACTIVE = DANGER_FG = DANGER_BORDER = DEVICE_1 = DEVICE_2 = DEVICE_3 = ""
 STATUS_COLORS: dict[str, str] = {}
-DEVICE_COLORS = {"PS5(X)": "#7c6cff", "PS5(Y)": "#38bdf8", "PS4": "#f472b6"}
+DEVICE_COLORS: dict[str, str] = {}
 
 
 def set_palette(name: str) -> None:
@@ -70,6 +108,8 @@ def set_palette(name: str) -> None:
     globals().update(PALETTES[CURRENT_THEME])
     STATUS_COLORS.clear()
     STATUS_COLORS.update({STATUS_PAID: SUCCESS, STATUS_UNPAID: DANGER, STATUS_PARTIAL: WARNING})
+    DEVICE_COLORS.clear()
+    DEVICE_COLORS.update({"PS5(X)": DEVICE_1, "PS5(Y)": DEVICE_2, "PS4": DEVICE_3})
 
 
 set_palette("Midnight")
@@ -148,7 +188,7 @@ def apply_theme(root: tk.Tk) -> None:
     style.configure("CardInfo.TLabel", background=SURFACE, foreground=INFO)
     style.configure("Error.TLabel", foreground=DANGER)
     style.configure("Banner.TLabel", background=BANNER_BG, foreground=BANNER_FG)
-    style.configure("Mode.TLabel", background=ACCENT_DIM, foreground=ON_ACCENT, padding=(10, 3), font=FONTS["small_bold"])
+    style.configure("Mode.TLabel", background=ACCENT_DIM, foreground=TEXT, padding=(10, 3), font=FONTS["small_bold"])
 
     style.configure("TButton", background=SURFACE_2, foreground=TEXT, padding=(12, 6), borderwidth=1, focusthickness=0)
     style.map(
@@ -250,7 +290,7 @@ def apply_theme(root: tk.Tk) -> None:
         rowheight=px(28),
         borderwidth=0,
     )
-    style.map("Treeview", background=[("selected", ACCENT_DIM)], foreground=[("selected", ON_ACCENT)])
+    style.map("Treeview", background=[("selected", ACCENT_DIM)], foreground=[("selected", TEXT)])
     style.configure("Treeview.Heading", background=SURFACE_2, foreground=TEXT, padding=(6, 6), font=FONTS["small_bold"], relief="flat")
     style.map("Treeview.Heading", background=[("active", SURFACE_3)])
 

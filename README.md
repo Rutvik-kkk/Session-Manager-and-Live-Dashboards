@@ -30,7 +30,8 @@ python -m unittest discover -s tests -v
 
 Opening hours, prices and pass terms can be changed in **☰ menu → General settings**. They are saved in
 `settings.json` in the data folder and take effect after a restart; the defaults below live in `ontop/config.py`.
-The ☰ menu also has **Theme** (Midnight, Ocean, Emerald, Sunset, Light) and **Exit**.
+The ☰ menu also has **Theme** (Midnight plus nine palettes such as Koi Ember and Neon Alley; new palettes are added
+in `ontop/ui/theme.py` from five base colours) and **Exit**.
 
 - **Opening hours** 09:00–22:00. New or changed sessions must start and end inside them (no overnight sessions).
 - **Price list** (per hour):

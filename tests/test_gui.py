@@ -105,9 +105,9 @@ class GuiWorkflowTests(unittest.TestCase):
         self.assertIn("hasn't been saved", self.ask.call_args.args[1])
         self.assertTrue(self.root.winfo_exists())
 
-        app.choose_theme("Ocean")
+        app.choose_theme("Koi Ember")
         saved = json.loads((self.path.parent / "settings.json").read_text(encoding="utf-8"))
-        self.assertEqual(saved["theme"], "Ocean")
+        self.assertEqual(saved["theme"], "Koi Ember")
         self.assertFalse(app.restart_requested)
         self.assertIn("restart", app.status.cget("text"))
 
