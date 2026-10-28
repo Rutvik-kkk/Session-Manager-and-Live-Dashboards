@@ -6,7 +6,6 @@ chosen with set_palette() before the window is built.
 
 from __future__ import annotations
 
-import colorsys
 import tkinter as tk
 from tkinter import font as tkfont
 from tkinter import ttk
@@ -37,61 +36,45 @@ def _mix(a: str, b: str, t: float) -> str:
     return "#" + "".join(f"{round(x + (y - x) * t):02x}" for x, y in zip(_rgb(a), _rgb(b)))
 
 
-def _luminance(color: str) -> float:
-    r, g, b = (c / 255 for c in _rgb(color))
-    return 0.2126 * r + 0.7152 * g + 0.0722 * b
-
-
-def _hue(color: str) -> float:
-    return colorsys.rgb_to_hls(*(c / 255 for c in _rgb(color)))[0]
-
-
-def _distinct_from(base: str, *others: str) -> str:
-    """``base`` re-hued as far as possible from every hue in ``others``."""
-    _, lightness, s = colorsys.rgb_to_hls(*(c / 255 for c in _rgb(base)))
-    taken = [_hue(c) for c in others]
-
-    def gap(h: float) -> float:
-        return min(min(abs(h - t), 1 - abs(h - t)) for t in taken)
-
-    hue = max((i / 36 for i in range(36)), key=gap)
-    r, g, b = colorsys.hls_to_rgb(hue, max(lightness, 0.55), max(s, 0.6))
-    return "#" + "".join(f"{round(c * 255):02x}" for c in (r, g, b))
-
-
-def _palette(bg: str, surface: str, text: str, accent: str, info: str) -> dict[str, str]:
-    """A full scheme built from five base colours plus the shared status colours."""
+def _palette(
+    bg: str, surface: str, surface_2: str, surface_3: str, text: str, muted: str,
+    accent: str, on_accent: str, info: str, devices: tuple[str, str, str],
+) -> dict[str, str]:
+    """A full scheme from hand-picked main colours; the minor shades are blended from them."""
     danger = _STATUS["DANGER"]
     return {
-        "BG": bg, "SURFACE": surface, "TEXT": text, "ACCENT": accent, "INFO": info, **_STATUS,
-        "SURFACE_2": _mix(surface, text, 0.06), "SURFACE_3": _mix(surface, text, 0.12),
-        "BORDER": _mix(surface, text, 0.16), "MUTED": _mix(text, surface, 0.38),
-        "DISABLED": _mix(text, surface, 0.62),
-        "ACCENT_HOVER": _mix(accent, "#ffffff", 0.18), "ACCENT_DIM": _mix(accent, surface, 0.6),
-        "ON_ACCENT": _mix(bg, "#000000", 0.4) if _luminance(accent) > 0.55 else "#ffffff",
-        "ROW_ALT": _mix(surface, text, 0.03), "GRID_MINOR": _mix(surface, text, 0.06),
-        "NOW_LINE": text, "BAR_TEXT": _mix(bg, "#000000", 0.4),
+        "BG": bg, "SURFACE": surface, "SURFACE_2": surface_2, "SURFACE_3": surface_3,
+        "TEXT": text, "MUTED": muted, "ACCENT": accent, "ON_ACCENT": on_accent, "INFO": info, **_STATUS,
+        "BORDER": _mix(surface, text, 0.14), "DISABLED": _mix(muted, surface, 0.45),
+        "ACCENT_HOVER": _mix(accent, "#ffffff", 0.16), "ACCENT_DIM": _mix(accent, surface, 0.58),
+        "ROW_ALT": _mix(surface, text, 0.035), "GRID_MINOR": _mix(surface, text, 0.07),
+        "NOW_LINE": text, "BAR_TEXT": _mix(bg, "#000000", 0.45),
         "BANNER_BG": _mix(surface, danger, 0.22), "BANNER_FG": _mix(text, danger, 0.25),
         "DANGER_BG": _mix(surface, danger, 0.2), "DANGER_ACTIVE": _mix(surface, danger, 0.3),
         "DANGER_FG": _mix(text, danger, 0.3), "DANGER_BORDER": _mix(surface, danger, 0.5),
-        "DEVICE_1": accent, "DEVICE_2": info, "DEVICE_3": _distinct_from(accent, accent, info, *_STATUS.values()),
+        "DEVICE_1": devices[0], "DEVICE_2": devices[1], "DEVICE_3": devices[2],
     }
 
 
 PALETTES: dict[str, dict[str, str]] = {
     "Midnight": _MIDNIGHT,
-    "Koi Ember": _palette("#0a0f12", "#20292d", "#f0e6df", "#f07844", "#79c4d4"),
-    "Crimson Forest": _palette("#081919", "#223330", "#eeede7", "#f05252", "#7ec8d5"),
-    "Indigo Silk": _palette("#0a1123", "#242744", "#eef0fa", "#8387c3", "#9ebef5"),
-    "Saffron Grove": _palette("#181d19", "#2c263f", "#f5eedd", "#f8c662", "#a9b9f0"),
-    "Electric Plum": _palette("#1d0c13", "#35152d", "#edede8", "#a78bfa", "#c5f9fc"),
-    "Whiskey Lounge": _palette("#150c0c", "#34150f", "#eaceaa", "#d39858", "#8fc4d4"),
-    "Lilac Mist": _palette("#2a193d", "#2f2c5e", "#f0eaf5", "#b494d4", "#97c2c5"),
-    "Neon Alley": _palette("#021826", "#07343b", "#e6fff4", "#06f284", "#64ddf0"),
-    "Cyber Aqua": _palette("#101f30", "#1a334a", "#e8f8fc", "#27e6ec", "#a7aced"),
+    "Dusk Blue": _palette("#24293e", "#2f3552", "#3a4163", "#454d73", "#f4f5fc", "#9ba1bd",
+                          "#8ebbff", "#1b2033", "#f2a7b8", ("#8ebbff", "#f2a7b8", "#c3a6f5")),
+    "Lavender Haze": _palette("#2a2438", "#352f44", "#433b55", "#5c5470", "#f1effa", "#aaa3bd",
+                              "#dbd8e3", "#2a2438", "#a99be0", ("#b8a6f0", "#8fc1e3", "#f0b8c8")),
+    "Alpine Dusk": _palette("#181e31", "#2d3250", "#3a4064", "#424769", "#f7f7fb", "#a3a8c8",
+                            "#f9b17a", "#2d3250", "#8f98d6", ("#f9b17a", "#8f98d6", "#e9d8c4")),
+    "Twinkle Sand": _palette("#1c1f2e", "#2a2f42", "#363d52", "#434c60", "#ece6dc", "#97a7ad",
+                             "#c9a37e", "#1e2133", "#9fb6bd", ("#c9a37e", "#9fb6bd", "#e8dcc8")),
+    "Violet Glass": _palette("#1d1550", "#2b2070", "#382c88", "#45389c", "#f4f2ff", "#b2aade",
+                             "#8a78ff", "#ffffff", "#7fb8ff", ("#a596ff", "#7fb8ff", "#f08ad8")),
+    "Forest Lodge": _palette("#072a20", "#0c3b2e", "#14493a", "#1c5847", "#f3f1e7", "#a8c0b0",
+                             "#6d9773", "#ffffff", "#d9a86c", ("#8fbf96", "#d9a86c", "#ece4cc")),
 }
 THEME_NAMES = tuple(PALETTES)
 CURRENT_THEME = "Midnight"
+# Themes drawn with the original square, bordered widgets; the rest use rounded, borderless ones.
+CLASSIC_THEMES = frozenset({"Midnight"})
 
 BG = SURFACE = SURFACE_2 = SURFACE_3 = BORDER = TEXT = MUTED = DISABLED = ""
 ACCENT = ACCENT_HOVER = ACCENT_DIM = ON_ACCENT = SUCCESS = DANGER = WARNING = INFO = ""
@@ -118,6 +101,8 @@ FONTS: dict[str, tkfont.Font] = {}
 
 # Display scale relative to 96 DPI (1.25 on a "125%" Windows display); set by apply_theme.
 SCALE = 1.0
+# Gap between a card's edge and its content, wide enough to keep rounded corners visible.
+CARD_INSET = 1
 
 
 def px(value: float) -> int:
@@ -306,3 +291,165 @@ def apply_theme(root: tk.Tk) -> None:
         style.map(f"{orient}.TScrollbar", background=[("active", SURFACE_3)])
 
     style.configure("TSeparator", background=BORDER)
+
+    if CURRENT_THEME not in CLASSIC_THEMES:
+        _apply_rounded_shapes(root, style)
+
+
+def _rounded_image(root: tk.Misc, fill: str, radius: int, outline: str | None = None):
+    """An anti-aliased rounded rectangle with transparent corners, for 9-slice image elements."""
+    from PIL import Image, ImageDraw, ImageTk
+
+    size, scale = radius * 2 + 12, 4
+    img = Image.new("RGBA", (size * scale, size * scale), (0, 0, 0, 0))
+    ImageDraw.Draw(img).rounded_rectangle(
+        (0, 0, size * scale - 1, size * scale - 1), radius=radius * scale, fill=fill,
+        outline=outline, width=max(1, round(SCALE * 1.5)) * scale if outline else 0,
+    )
+    return ImageTk.PhotoImage(img.resize((size, size), Image.LANCZOS), master=root)
+
+
+def _arrow_image(root: tk.Misc, color: str, up: bool = False):
+    """A small anti-aliased triangle on a transparent background."""
+    from PIL import Image, ImageDraw, ImageTk
+
+    w, h, scale = px(9), px(5), 4
+    img = Image.new("RGBA", (w * scale, h * scale), (0, 0, 0, 0))
+    points = [(0, 0), (w * scale, 0), (w * scale / 2, h * scale)]
+    if up:
+        points = [(x, h * scale - y) for x, y in points]
+    ImageDraw.Draw(img).polygon(points, fill=color)
+    return ImageTk.PhotoImage(img.resize((w, h), Image.LANCZOS), master=root)
+
+
+def _parent_background(style: ttk.Style, widget: tk.Misc) -> str:
+    parent = widget.master
+    if isinstance(parent, ttk.Widget):
+        return style.lookup(str(parent.cget("style")) or parent.winfo_class(), "background")
+    try:
+        return str(parent.cget("background"))
+    except tk.TclError:
+        return ""
+
+
+def _replace_element(layout: list, old: str, new: str) -> list:
+    out = []
+    for name, opts in layout:
+        opts = dict(opts)
+        opts.pop("border", None)
+        if "children" in opts:
+            opts["children"] = _replace_element(opts["children"], old, new)
+        out.append((new if name == old else name, opts))
+    return out
+
+
+def _apply_rounded_shapes(root: tk.Misc, style: ttk.Style) -> None:
+    """Rounded, borderless cards, buttons and fields in the style of modern app mock-ups."""
+    try:
+        import PIL.ImageTk  # noqa: F401
+    except ImportError:
+        return
+    images: list = []
+    root._rounded_images = images  # PhotoImages vanish once unreferenced
+
+    def element(name: str, radius: int, normal: tuple, states=(), padding=0) -> None:
+        def image(colors: tuple):
+            img = _rounded_image(root, colors[0], radius, colors[1] if len(colors) > 1 else None)
+            images.append(img)
+            return img
+
+        base = image(normal)
+        specs = [(state, image(colors)) for state, colors in states]
+        try:
+            style.element_create(name, "image", base, *specs, border=radius + 2, padding=padding, sticky="nsew")
+        except tk.TclError:
+            pass  # already created for this interpreter
+
+    card_r, button_r, field_r = px(14), px(8), px(7)
+    global CARD_INSET
+    CARD_INSET = round(card_r * 0.32) + 1
+    element("Rounded.card", card_r, (SURFACE,))
+    style.layout("Card.TFrame", [("Rounded.card", {"sticky": "nsew"})])
+    style.configure("Card.TFrame", background=BG)
+
+    button_layout = _replace_element(style.layout("TButton"), "Button.border", "{}")
+    buttons = {
+        "TButton": ((SURFACE_2,), [("disabled", (SURFACE,)), ("pressed", (SURFACE_3,)), ("active", (SURFACE_3,))]),
+        "Accent.TButton": ((ACCENT,), [("disabled", (ACCENT_DIM,)), ("pressed", (ACCENT_HOVER,)),
+                                       ("active", (ACCENT_HOVER,))]),
+        "Danger.TButton": ((DANGER_BG, DANGER_BORDER), [("pressed", (DANGER_ACTIVE, DANGER_BORDER)),
+                                                        ("active", (DANGER_ACTIVE, DANGER_BORDER))]),
+        "Chip.TButton": ((SURFACE_3,), [("pressed", (_mix(SURFACE_3, TEXT, 0.14),)),
+                                        ("active", (_mix(SURFACE_3, TEXT, 0.08),))]),
+        "Nav.TButton": ((SURFACE,), [("pressed", (SURFACE_3,)), ("active", (SURFACE_2,))]),
+        "NavActive.TButton": ((ACCENT,), [("pressed", (ACCENT_HOVER,)), ("active", (ACCENT_HOVER,))]),
+    }
+    for name, (normal, states) in buttons.items():
+        el = f"Rounded.{name}.border"
+        element(el, button_r, normal, states)
+        style.layout(name, _replace_element(button_layout, "{}", el))
+        style.configure(name, background=BG if name.startswith("Nav") else SURFACE)
+        style.map(name, background=[])
+    style.layout("Small.TButton", style.layout("TButton"))
+    style.configure("Nav.TButton", padding=(20, 7))
+    style.configure("NavActive.TButton", padding=(20, 7))
+
+    field_states = [
+        ("disabled", (SURFACE, BORDER)), ("readonly !focus", (SURFACE, BORDER)), ("focus", (SURFACE_2, ACCENT)),
+    ]
+    element("Rounded.field", field_r, (SURFACE_2,), field_states, padding=px(3))
+    element("Rounded.select", field_r, (SURFACE_2,), [("disabled", (SURFACE, BORDER)), ("focus", (SURFACE_2, ACCENT))],
+            padding=px(3))
+    element("Rounded.invalid", field_r, (SURFACE_2, DANGER), padding=px(3))
+    entry = _replace_element(style.layout("TEntry"), "Entry.field", "Rounded.field")
+    style.layout("TEntry", entry)
+    style.layout("Balance.TEntry", entry)
+    style.layout("Invalid.TEntry", _replace_element(entry, "Rounded.field", "Rounded.invalid"))
+    style.configure("TEntry", padding=(6, 3), background=SURFACE)
+    style.map("TEntry", background=[])
+
+    element("Rounded.tab", button_r, (BG,), [("selected", (SURFACE_2,)), ("active", (SURFACE,))])
+    style.layout("Sub.TNotebook.Tab", _replace_element(style.layout("TNotebook.Tab"), "Notebook.tab", "Rounded.tab"))
+    style.map("Sub.TNotebook.Tab", background=[], expand=[])
+    style.configure("Sub.TNotebook.Tab", padding=(16, 6))
+    for name in ("Main.TNotebook", "Sub.TNotebook", "TNotebook"):
+        style.configure(name, bordercolor=BG, lightcolor=BG, darkcolor=BG)
+    style.configure("Treeview", bordercolor=SURFACE_2, lightcolor=SURFACE_2, darkcolor=SURFACE_2)
+
+    for name, up in (("Rounded.downarrow", False), ("Rounded.uparrow", True)):
+        normal, faded = _arrow_image(root, MUTED, up), _arrow_image(root, DISABLED, up)
+        hover = _arrow_image(root, TEXT, up)
+        images.extend((normal, faded, hover))
+        try:
+            style.element_create(name, "image", normal, ("disabled", faded), ("active", hover),
+                                 sticky="", padding=(px(6), px(1)))
+        except tk.TclError:
+            pass
+
+    style.layout("TCombobox", [("Rounded.select", {"sticky": "nsew", "children": [
+        ("Rounded.downarrow", {"side": "right", "sticky": "ns"}),
+        ("Combobox.padding", {"sticky": "nsew", "children": [("Combobox.textarea", {"sticky": "nsew"})]}),
+    ]})])
+    spinbox = _replace_element(style.layout("TSpinbox"), "Spinbox.field", "Rounded.select")
+    spinbox = _replace_element(spinbox, "Spinbox.uparrow", "Rounded.uparrow")
+    style.layout("TSpinbox", _replace_element(spinbox, "Spinbox.downarrow", "Rounded.downarrow"))
+    for name in ("TCombobox", "TSpinbox"):
+        style.configure(name, padding=(5, 2), background=SURFACE)
+        style.map(name, background=[])
+
+    # ttk paints a widget's own background into the transparent corners, so each rounded
+    # widget takes the background of whatever it sits on.
+    def match_parent(event: tk.Event) -> None:
+        widget = event.widget
+        if not isinstance(widget, ttk.Widget):
+            return
+        current = str(widget.cget("style")) or widget.winfo_class()
+        bg = _parent_background(style, widget)
+        if not bg or style.lookup(current, "background") == bg:
+            return
+        fitted = f"On{bg.lstrip('#')}.{current.split('.', 1)[1] if current.startswith('On') else current}"
+        style.configure(fitted, background=bg)
+        widget.configure(style=fitted)
+
+    for cls in ("TButton", "TEntry", "TCombobox", "TSpinbox"):
+        root.bind_class(cls, "<Map>", match_parent, add="+")

@@ -534,7 +534,7 @@ class SettingsTests(TempStoreCase):
         self.addCleanup(lambda: [setattr(config, k, v) for k, v in saved.items()])
         path = st.settings_path(self.dir)
         self.assertEqual(st.load(path), (st.AppSettings(), None))
-        s = st.AppSettings(theme="Neon Alley", opening="10:00", closing="23:00", pass_price_paise=250000, pass_hours=20)
+        s = st.AppSettings(theme="Forest Lodge", opening="10:00", closing="23:00", pass_price_paise=250000, pass_hours=20)
         s.hourly_rates_paise["PS4"][2] = 13000
         st.save(path, s)
         loaded, warning = st.load(path)
@@ -563,15 +563,15 @@ class SettingsTests(TempStoreCase):
         from ontop.ui import theme
 
         keys = set(theme.PALETTES["Midnight"])
-        self.assertEqual(len(theme.PALETTES), 10)
+        self.assertEqual(len(theme.PALETTES), 7)
         for name, palette in theme.PALETTES.items():
             self.assertEqual(set(palette), keys, name)
             self.assertTrue(all(len(c) == 7 and c.startswith("#") for c in palette.values()), name)
-        self.assertEqual(theme.PALETTES["Neon Alley"]["SUCCESS"], "#4ade80")
-        self.assertEqual(theme.PALETTES["Koi Ember"]["DEVICE_1"], "#f07844")
+        self.assertEqual(theme.PALETTES["Forest Lodge"]["SUCCESS"], "#4ade80")
+        self.assertEqual(theme.PALETTES["Alpine Dusk"]["ACCENT"], "#f9b17a")
         self.addCleanup(theme.set_palette, "Midnight")
-        theme.set_palette("Cyber Aqua")
-        self.assertEqual(theme.DEVICE_COLORS["PS5(Y)"], "#a7aced")
+        theme.set_palette("Dusk Blue")
+        self.assertEqual(theme.DEVICE_COLORS["PS5(Y)"], "#f2a7b8")
         theme.set_palette("Retired theme")
         self.assertEqual(theme.CURRENT_THEME, "Midnight")
 

@@ -17,7 +17,7 @@ def card(master: tk.Misc, padding: int | tuple[int, ...] = 16) -> tuple[ttk.Fram
     """A bordered surface; returns (outer, inner) where widgets go into inner."""
     outer = ttk.Frame(master, style="Card.TFrame")
     inner = ttk.Frame(outer, style="Inner.TFrame", padding=padding)
-    inner.pack(fill="both", expand=True, padx=1, pady=1)
+    inner.pack(fill="both", expand=True, padx=theme.CARD_INSET, pady=theme.CARD_INSET)
     return outer, inner
 
 

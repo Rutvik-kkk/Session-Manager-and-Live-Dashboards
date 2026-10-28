@@ -171,7 +171,7 @@ class SessionMappingTab(ttk.Frame):
         self.date_error = ttk.Label(self, style="Error.TLabel")
         self.date_error.pack(fill="x")
 
-        frame = ttk.Frame(self, style="Card.TFrame")
+        frame = ttk.Frame(self, style="Card.TFrame", padding=theme.CARD_INSET - 1)
         frame.pack(fill="both", expand=True)
         self.labels = tk.Canvas(frame, width=theme.px(LABEL_W), background=theme.SURFACE, highlightthickness=0)
         self.labels.grid(row=0, column=0, sticky="ns", padx=(1, 0), pady=(1, 0))
