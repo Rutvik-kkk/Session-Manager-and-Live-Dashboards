@@ -130,6 +130,35 @@ class MoneyTests(unittest.TestCase):
         self.assertEqual(fmt_money(12345678), "₹1,23,456.78")
 
 
+class ClockFormatTests(unittest.TestCase):
+    def setUp(self):
+        from ontop import formatting
+
+        self.f = formatting
+        self.addCleanup(setattr, formatting, "CLOCK_24H", True)
+
+    def test_parse_accepts_both_styles(self):
+        p = self.f.parse_time
+        for text, expected in (("18:30", (18, 30)), ("6:30 PM", (18, 30)), ("6:30pm", (18, 30)), ("6 pm", (18, 0)),
+                               ("12:00 AM", (0, 0)), ("12:15 p.m.", (12, 15)), ("9:05 am", (9, 5)), ("0:00", (0, 0))):
+            t = p(text)
+            self.assertEqual((t.hour, t.minute), expected, text)
+        for bad in ("13:00 PM", "0:30 AM", "6", "6:30 m", "25:00", "6:60 pm", ""):
+            with self.assertRaises(ValueError, msg=bad):
+                p(bad)
+
+    def test_display_follows_setting(self):
+        from datetime import time
+
+        self.assertEqual(self.f.fmt_clock(time(18, 5)), "18:05")
+        self.assertEqual(self.f.fmt_hour(9), "09:00")
+        self.f.CLOCK_24H = False
+        self.assertEqual([self.f.fmt_clock(time(h, 5)) for h in (0, 9, 12, 18)],
+                         ["12:05 AM", "9:05 AM", "12:05 PM", "6:05 PM"])
+        self.assertEqual(self.f.fmt_hour(21), "9 PM")
+        self.assertIn("6:05 PM", self.f.fmt_datetime(local_datetime(date(2026, 10, 28), time(18, 5))))
+
+
 class PaymentTests(unittest.TestCase):
     def test_status_rules(self):
         self.assertEqual(suggest_status(50000, 50000), "Paid")
@@ -532,9 +561,11 @@ class SettingsTests(TempStoreCase):
                                                  "HALF_HOUR_PRICES_PAISE", "PASS_DEFAULT_PRICE_PAISE",
                                                  "PASS_HOURS", "PASS_VALID_DAYS")}
         self.addCleanup(lambda: [setattr(config, k, v) for k, v in saved.items()])
+        self.addCleanup(setattr, st.formatting, "CLOCK_24H", True)
         path = st.settings_path(self.dir)
         self.assertEqual(st.load(path), (st.AppSettings(), None))
-        s = st.AppSettings(theme="Forest Lodge", opening="10:00", closing="23:00", pass_price_paise=250000, pass_hours=20)
+        s = st.AppSettings(theme="Forest Lodge", opening="10:00", closing="23:00", pass_price_paise=250000, pass_hours=20,
+                           clock_24h=False)
         s.hourly_rates_paise["PS4"][2] = 13000
         st.save(path, s)
         loaded, warning = st.load(path)
@@ -543,6 +574,7 @@ class SettingsTests(TempStoreCase):
         st.apply(loaded)
         self.assertEqual((config.OPENING_TIME, config.CLOSING_TIME), (time(10), time(23)))
         self.assertEqual((config.HOURLY_RATES_PAISE["PS4"][2], config.PASS_HOURS), (13000, 20))
+        self.assertFalse(st.formatting.CLOCK_24H)
 
     def test_invalid_settings_fall_back_to_defaults(self):
         from ontop import settings as st

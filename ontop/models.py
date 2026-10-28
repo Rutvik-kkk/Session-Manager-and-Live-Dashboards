@@ -19,6 +19,7 @@ from .config import (
     PASS_VALID_DAYS,
 )
 from .formatting import (
+    fmt_clock,
     fmt_date_long,
     fmt_duration,
     fmt_money,
@@ -494,18 +495,18 @@ def duration_problem(start: datetime, end: datetime) -> str | None:
 
 
 def opening_hours_text() -> str:
-    return f"{OPENING_TIME:%H:%M}–{CLOSING_TIME:%H:%M}"
+    return f"{fmt_clock(OPENING_TIME)}–{fmt_clock(CLOSING_TIME)}"
 
 
 def opening_hours_problem(start: datetime, end: datetime) -> str | None:
     s, e = to_local(start), to_local(end)
     closing = local_datetime(s.date(), CLOSING_TIME)
     if s.time() < OPENING_TIME:
-        return f"The café opens at {OPENING_TIME:%H:%M}; sessions cannot start before then."
+        return f"The café opens at {fmt_clock(OPENING_TIME)}; sessions cannot start before then."
     if e > closing:
         return (
-            f"The café closes at {CLOSING_TIME:%H:%M}; this session would end at "
-            f"{e:%H:%M}{'' if e.date() == s.date() else ' the next day'}."
+            f"The café closes at {fmt_clock(CLOSING_TIME)}; this session would end at "
+            f"{fmt_clock(e)}{'' if e.date() == s.date() else ' the next day'}."
         )
     return None
 
@@ -522,8 +523,8 @@ def duration_minutes_problem(minutes: int, start: datetime | None = None) -> str
         limit = max_minutes_until_close(start)
         if minutes > limit:
             return (
-                f"A {fmt_duration(minutes)} session starting at {to_local(start):%H:%M} would run past closing "
-                f"time ({CLOSING_TIME:%H:%M}). The longest possible is {fmt_duration(max(limit, 0))}."
+                f"A {fmt_duration(minutes)} session starting at {fmt_clock(start)} would run past closing "
+                f"time ({fmt_clock(CLOSING_TIME)}). The longest possible is {fmt_duration(max(limit, 0))}."
             )
     return None
 

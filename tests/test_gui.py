@@ -98,7 +98,7 @@ class GuiWorkflowTests(unittest.TestCase):
         self.assertEqual(app.nav_buttons[str(app.mapping)].cget("style"), "NavActive.TButton")
         labels = [app.menu.entrycget(i, "label") for i in range(app.menu.index("end") + 1)
                   if app.menu.type(i) != "separator"]
-        self.assertEqual(labels, ["General settings…", "Theme", "Exit"])
+        self.assertEqual(labels, ["General settings…", "Theme", "Clock format", "Exit"])
 
         self.e.name_var.set("Asha")
         self.ask.return_value = False
@@ -146,6 +146,24 @@ class GuiWorkflowTests(unittest.TestCase):
             self.assertEqual(sorted(found), ["No", "Yes"])
             found[label].invoke()
             self.assertEqual(d.result, expected)
+
+    def test_twelve_hour_time_field(self):
+        from ontop import formatting
+        from ontop.ui.widgets import TimeField
+
+        self.addCleanup(setattr, formatting, "CLOCK_24H", True)
+        formatting.CLOCK_24H = False
+        var = tk.StringVar(value="18:30")
+        field = TimeField(self.root, var)
+        self.assertEqual((field.text_var.get(), field.half), ("6:30", "PM"))
+        field.toggle_half()
+        self.assertEqual(var.get(), "6:30 AM")
+        field.text_var.set("11:15")
+        self.assertEqual(var.get(), "11:15 AM")
+        field.toggle_half()
+        self.assertEqual(formatting.parse_time(var.get()).strftime("%H:%M"), "23:15")
+        var.set("12:00 AM")
+        self.assertEqual((field.text_var.get(), field.half_button.cget("text")), ("12:00", "AM"))
 
     def test_duration_buttons_step_by_hour_and_half_hour(self):
         e = self.e

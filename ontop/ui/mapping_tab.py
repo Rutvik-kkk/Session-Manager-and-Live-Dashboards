@@ -9,11 +9,13 @@ from typing import TYPE_CHECKING
 
 from ..analytics import bar_span, hour_moment, sessions_on_day, timeline_hours
 from ..formatting import (
+    fmt_clock,
     fmt_date,
     fmt_date_long,
     fmt_datetime,
     fmt_datetime_long,
     fmt_duration,
+    fmt_hour,
     fmt_money,
     now_local,
     to_local,
@@ -280,7 +282,7 @@ class SessionMappingTab(ttk.Frame):
                            anchor="w", fill=theme.MUTED, font=small)
         lc.create_line(label_w - 1, 0, label_w - 1, height, fill=theme.BORDER)
 
-        label_every = 1 if span_w / hours >= 46 else 2
+        label_every = 1 if span_w / hours >= small.measure(fmt_hour(12)) + theme.px(14) else 2
         for hour in range(first_hour, last_hour + 1):
             moment = hour_moment(self.selected_date, hour)
             x = x_at(moment)
@@ -290,7 +292,7 @@ class SessionMappingTab(ttk.Frame):
                 c.create_line(half, header_h, half, height - 12, fill=theme.GRID_MINOR, dash=(2, 4))
             if (hour - first_hour) % label_every == 0:
                 anchor = "w" if hour == first_hour else ("e" if hour == last_hour else "center")
-                c.create_text(x, header_h / 2, text=f"{hour:02d}:00", fill=theme.MUTED, font=small, anchor=anchor)
+                c.create_text(x, header_h / 2, text=fmt_hour(hour), fill=theme.MUTED, font=small, anchor=anchor)
         c.create_line(0, header_h, width, header_h, fill=theme.BORDER)
 
         for s in sessions:
@@ -312,8 +314,8 @@ class SessionMappingTab(ttk.Frame):
             prefix = "‹ " if starts_before else ""
             suffix = " ›" if ends_after else ""
             ls, le = to_local(s.start), to_local(s.end)
-            start_txt = ls.strftime("%H:%M") if not starts_before else ls.strftime("%d %b %H:%M")
-            end_txt = le.strftime("%H:%M") if not ends_after else le.strftime("%d %b %H:%M")
+            start_txt = fmt_clock(ls) if not starts_before else f"{ls:%d %b} {fmt_clock(ls)}"
+            end_txt = fmt_clock(le) if not ends_after else f"{le:%d %b} {fmt_clock(le)}"
             room = x1 - x0 - 12
             badges = ("★ " if s.pass_id else "") + prefix
             players = f" · {s.players}P" if s.players > 1 else ""
@@ -332,8 +334,10 @@ class SessionMappingTab(ttk.Frame):
         if self.selected_date == now.date() and day_start <= now <= day_end:
             x = x_at(now)
             c.create_line(x, header_h - 4, x, height - 12, fill=theme.NOW_LINE, width=2)
-            c.create_rectangle(x - theme.px(26), 3, x + theme.px(26), header_h - 15, fill=theme.NOW_LINE, outline="")
-            c.create_text(x, (header_h - 12) / 2 + 1, text=now.strftime("%H:%M"), fill=theme.SURFACE, font=bold)
+            label = fmt_clock(now)
+            half_w = bold.measure(label) / 2 + theme.px(6)
+            c.create_rectangle(x - half_w, 3, x + half_w, header_h - 15, fill=theme.NOW_LINE, outline="")
+            c.create_text(x, (header_h - 12) / 2 + 1, text=label, fill=theme.SURFACE, font=bold)
 
         if not sessions:
             scope = "any device" if len(devices) > 1 else devices[0]

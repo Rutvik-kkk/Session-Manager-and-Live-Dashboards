@@ -12,14 +12,15 @@ from datetime import date, datetime, time, timedelta
 from decimal import Decimal, InvalidOperation
 
 DATE_FMT = "%Y-%m-%d"
-TIME_FMT = "%H:%M"
 RUPEE = "\u20b9"
+# Display style for times of day (set from settings at startup); typed times may use either style.
+CLOCK_24H = True
 
 # Ten crore rupees; far above any realistic session charge, but keeps typos
 # such as an extra row of zeros from being accepted.
 MAX_MONEY_PAISE = 10_000_000_00
 
-_TIME_RE = re.compile(r"^(\d{1,2}):(\d{2})$")
+_TIME_RE = re.compile(r"^(\d{1,2})(?::(\d{2}))?(?:\s*([ap])\.?\s*m?\.?)?$", re.IGNORECASE)
 _MONEY_RE = re.compile(r"^(\d+(\.\d{0,2})?|\.\d{1,2})$")
 
 
@@ -74,17 +75,44 @@ def parse_date(text: str, field: str = "Date") -> date:
         raise ValueError(f"{field} '{cleaned}' is not a valid date. Use YYYY-MM-DD, e.g. 2026-10-27.") from None
 
 
+def time_hint() -> str:
+    """How times should be typed, matching the chosen clock style."""
+    return "e.g. 6:30 PM" if not CLOCK_24H else "24-hour HH:MM, e.g. 18:30"
+
+
 def parse_time(text: str, field: str = "Time") -> time:
+    """Accepts 24-hour '18:30' or 12-hour '6:30 PM' / '6:30pm' / '6 pm', whatever the display setting."""
     cleaned = text.strip()
     if not cleaned:
-        raise ValueError(f"{field} is required (24-hour HH:MM).")
+        raise ValueError(f"{field} is required ({time_hint()}).")
     match = _TIME_RE.match(cleaned)
-    if not match:
-        raise ValueError(f"{field} '{cleaned}' is not valid. Use 24-hour HH:MM, e.g. 18:30.")
-    hour, minute = int(match.group(1)), int(match.group(2))
-    if hour > 23 or minute > 59:
+    if not match or (match.group(2) is None and not match.group(3)):
+        raise ValueError(f"{field} '{cleaned}' is not valid. Use {time_hint()}.")
+    hour, minute, half = int(match.group(1)), int(match.group(2) or 0), (match.group(3) or "").lower()
+    if half:
+        if not 1 <= hour <= 12 or minute > 59:
+            raise ValueError(f"{field} '{cleaned}' is out of range. Use 12:00 AM to 11:59 PM.")
+        hour = hour % 12 + (12 if half == "p" else 0)
+    elif hour > 23 or minute > 59:
         raise ValueError(f"{field} '{cleaned}' is out of range. Use 00:00 to 23:59.")
     return time(hour, minute)
+
+
+def fmt_clock(value: time | datetime) -> str:
+    """A time of day in the chosen style: '18:30' or '6:30 PM'."""
+    if isinstance(value, datetime):
+        value = to_local(value).time() if value.tzinfo else value.time()
+    if CLOCK_24H:
+        return f"{value.hour:02d}:{value.minute:02d}"
+    return f"{value.hour % 12 or 12}:{value.minute:02d} {'AM' if value.hour < 12 else 'PM'}"
+
+
+def fmt_hour(hour: int) -> str:
+    """Short hour label for axes: '18:00' or '6 PM'."""
+    if CLOCK_24H:
+        return f"{hour % 24:02d}:00"
+    hour %= 24
+    return f"{hour % 12 or 12} {'AM' if hour < 12 else 'PM'}"
 
 
 def fmt_date(d: date) -> str:
@@ -96,11 +124,12 @@ def fmt_date_long(d: date) -> str:
 
 
 def fmt_time(dt: datetime) -> str:
-    return to_local(dt).strftime(TIME_FMT)
+    return fmt_clock(dt)
 
 
 def fmt_datetime(dt: datetime) -> str:
-    return to_local(dt).strftime(f"{DATE_FMT} {TIME_FMT}")
+    local = to_local(dt)
+    return f"{local.strftime(DATE_FMT)} {fmt_clock(local)}"
 
 
 def fmt_offset(dt: datetime) -> str:
@@ -113,7 +142,7 @@ def fmt_offset(dt: datetime) -> str:
 
 def fmt_datetime_long(dt: datetime) -> str:
     local = to_local(dt)
-    return f"{local.strftime('%a %d %b %Y, %H:%M')} ({fmt_offset(local)})"
+    return f"{local.strftime('%a %d %b %Y')}, {fmt_clock(local)} ({fmt_offset(local)})"
 
 
 def fmt_range(start: datetime, end: datetime) -> str:

@@ -229,7 +229,8 @@ def apply_theme(root: tk.Tk) -> None:
     style.configure("TSpinbox", fieldbackground=SURFACE_2, background=SURFACE_2, foreground=TEXT, arrowcolor=TEXT, padding=5)
     style.map("TSpinbox", bordercolor=[("focus", ACCENT)], fieldbackground=[("disabled", SURFACE)])
 
-    for name, bg in (("TCheckbutton", BG), ("Card.TCheckbutton", SURFACE)):
+    for name, bg in (("TCheckbutton", BG), ("Card.TCheckbutton", SURFACE),
+                     ("TRadiobutton", BG), ("Card.TRadiobutton", SURFACE)):
         style.configure(name, background=bg, foreground=TEXT, indicatorbackground=SURFACE_2, indicatorforeground=ON_ACCENT)
         style.map(
             name,

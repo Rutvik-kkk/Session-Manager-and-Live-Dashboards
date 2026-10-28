@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING
 
 from ..config import CLOSING_TIME, DEVICES, OPENING_TIME, PLAYER_COUNTS
 from ..formatting import (
+    fmt_clock,
     fmt_date,
     fmt_date_long,
     fmt_datetime,
@@ -22,6 +23,7 @@ from ..formatting import (
     parse_date,
     parse_money,
     parse_time,
+    time_hint,
     to_local,
 )
 from ..models import (
@@ -53,7 +55,7 @@ from ..models import (
 from ..pricing import billable_minutes, charge_explanation, players_problem, suggested_charge
 from ..storage import StorageError
 from . import dialogs, theme
-from .widgets import DateEntry, ScrollableFrame, Tooltip, card
+from .widgets import DateEntry, ScrollableFrame, TimeField, Tooltip, card
 
 if TYPE_CHECKING:
     from .app import OnTopApp
@@ -204,7 +206,7 @@ class SessionEntryTab(ttk.Frame):
 
     def _build_timing(self, parent):
         f = self._section(parent, "Timing",
-                          f"Open {opening_hours_text()} · 24-hour times (HH:MM) in this computer's local timezone.")
+                          f"Open {opening_hours_text()} · times ({time_hint()}) in this computer's local timezone.")
         self._field_label(f, "Session date", 2, True)
         row = ttk.Frame(f, style="Inner.TFrame")
         row.grid(row=2, column=1, columnspan=3, sticky="w", pady=4)
@@ -216,13 +218,13 @@ class SessionEntryTab(ttk.Frame):
         self._field_label(f, "Start time", 3, True)
         row = ttk.Frame(f, style="Inner.TFrame")
         row.grid(row=3, column=1, columnspan=3, sticky="w", pady=4)
-        self.start_entry = ttk.Entry(row, textvariable=self.start_var, width=8)
-        self.start_entry.pack(side="left")
+        self.start_field = TimeField(row, self.start_var)
+        self.start_field.pack(side="left")
         ttk.Button(row, text="Now", style="Small.TButton", command=self._start_now).pack(side="left", padx=(8, 0))
 
         self._field_label(f, "End time", 4, True)
-        self.end_entry = ttk.Entry(f, textvariable=self.end_var, width=8)
-        self.end_entry.grid(row=4, column=1, sticky="w", pady=4)
+        self.end_field = TimeField(f, self.end_var)
+        self.end_field.grid(row=4, column=1, sticky="w", pady=4)
 
         self._field_label(f, "Duration", 5, True)
         row = ttk.Frame(f, style="Inner.TFrame")
@@ -429,8 +431,8 @@ class SessionEntryTab(ttk.Frame):
             self.device_var.set("")
             self.players_var.set("1")
             self.date_var.set(fmt_date(start.date()))
-            self.start_var.set(start.strftime("%H:%M"))
-            self.end_var.set(end.strftime("%H:%M"))
+            self.start_var.set(fmt_clock(start))
+            self.end_var.set(fmt_clock(end))
             self.dur_h_var.set(str(minutes // 60))
             self.dur_m_var.set(str(minutes % 60))
             self.extend_var.set("30")
@@ -484,8 +486,8 @@ class SessionEntryTab(ttk.Frame):
             self.device_var.set(session.device)
             self.players_var.set(str(session.players))
             self.date_var.set(fmt_date(start.date()))
-            self.start_var.set(start.strftime("%H:%M"))
-            self.end_var.set(end.strftime("%H:%M"))
+            self.start_var.set(fmt_clock(start))
+            self.end_var.set(fmt_clock(end))
             self.dur_h_var.set(str(session.duration_minutes // 60))
             self.dur_m_var.set(str(session.duration_minutes % 60))
             self.method_var.set(session.payment_method)
@@ -542,7 +544,7 @@ class SessionEntryTab(ttk.Frame):
 
     def _start_now(self):
         self.date_var.set(fmt_date(now_local().date()))
-        self.start_var.set(now_local().strftime("%H:%M"))
+        self.start_var.set(fmt_clock(now_local()))
 
     def _on_times_changed(self):
         if not self._syncing:
@@ -576,7 +578,7 @@ class SessionEntryTab(ttk.Frame):
         minutes = duration_between(start, end)
         s, e = to_local(start), to_local(end)
         billed = billable_minutes(minutes)
-        text = f"{fmt_date_long(s.date())}   {s:%H:%M} → {e:%H:%M}   ·   {fmt_duration(minutes)}"
+        text = f"{fmt_date_long(s.date())}   {fmt_clock(s)} → {fmt_clock(e)}   ·   {fmt_duration(minutes)}"
         if billed != minutes:
             text += f" (billed as {fmt_duration(billed)})"
         self.span_label.configure(text=text)
@@ -629,7 +631,7 @@ class SessionEntryTab(ttk.Frame):
         end = add_minutes(start, minutes)
         self._syncing = True
         try:
-            self.end_var.set(end.strftime("%H:%M"))
+            self.end_var.set(fmt_clock(end))
         finally:
             self._syncing = False
         self._recalc_from_times()
@@ -814,8 +816,8 @@ class SessionEntryTab(ttk.Frame):
         if new_minutes > max_minutes_until_close(start):
             fail(
                 "Past closing time",
-                f"Adding {minutes} min would end the session at {to_local(new_end):%H:%M}, after closing time "
-                f"({CLOSING_TIME:%H:%M}). The latest it can be extended to is {CLOSING_TIME:%H:%M}.",
+                f"Adding {minutes} min would end the session at {fmt_clock(new_end)}, after closing time "
+                f"({fmt_clock(CLOSING_TIME)}). The latest it can be extended to is {fmt_clock(CLOSING_TIME)}.",
             )
             return
         if self.pass_var.get() and self._pass is not None:
@@ -832,7 +834,7 @@ class SessionEntryTab(ttk.Frame):
 
         self._syncing = True
         try:
-            self.end_var.set(to_local(new_end).strftime("%H:%M"))
+            self.end_var.set(fmt_clock(new_end))
         finally:
             self._syncing = False
         self._recalc_from_times()

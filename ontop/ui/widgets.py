@@ -9,7 +9,8 @@ from datetime import date
 from tkinter import ttk
 from typing import Any, Callable, Iterable, Sequence
 
-from ..formatting import DATE_FMT, parse_date, today_local
+from .. import formatting
+from ..formatting import DATE_FMT, parse_date, parse_time, today_local
 from . import theme
 
 
@@ -241,6 +242,77 @@ class DateEntry(ttk.Frame):
         self.set_date(d)
         if self.on_pick:
             self.on_pick(d)
+
+
+class TimeField(ttk.Frame):
+    """Time-of-day entry bound to ``variable``; with the 12-hour clock it gets an AM/PM toggle.
+
+    ``variable`` always holds the full text ('18:30' or '6:30 PM'), so callers read and set it as usual.
+    """
+
+    def __init__(self, master: tk.Misc, variable: tk.StringVar, style: str = "Inner.TFrame"):
+        super().__init__(master, style=style)
+        self.var = variable
+        self.half_button: ttk.Button | None = None
+        if formatting.CLOCK_24H:
+            self.entry = ttk.Entry(self, textvariable=variable, width=8)
+            self.entry.pack(side="left")
+            return
+        self._syncing = False
+        self.half = "AM"
+        self.text_var = tk.StringVar()
+        self.entry = ttk.Entry(self, textvariable=self.text_var, width=6, justify="center")
+        self.entry.pack(side="left")
+        self.half_button = ttk.Button(self, text=self.half, width=4, style="Small.TButton", command=self.toggle_half)
+        self.half_button.pack(side="left", padx=(4, 0))
+        Tooltip(self.half_button, "Switch between AM and PM")
+        self.text_var.trace_add("write", lambda *_: self._push())
+        variable.trace_add("write", lambda *_: self._pull())
+        self._pull()
+
+    def toggle_half(self):
+        self._set_half("PM" if self.half == "AM" else "AM")
+        self._push()
+
+    def _set_half(self, half: str):
+        self.half = half
+        if self.half_button is not None:
+            self.half_button.configure(text=half)
+
+    def _push(self):
+        if self._syncing:
+            return
+        text = self.text_var.get().strip()
+        combined = f"{text} {self.half}" if text else ""
+        try:
+            parse_time(combined)
+        except ValueError:
+            try:
+                parse_time(text)
+                combined = text  # already has AM/PM or is an unambiguous 24-hour time like 18:30
+            except ValueError:
+                pass
+        self._syncing = True
+        try:
+            self.var.set(combined)
+        finally:
+            self._syncing = False
+
+    def _pull(self):
+        if self._syncing:
+            return
+        value = self.var.get()
+        self._syncing = True
+        try:
+            try:
+                t = parse_time(value)
+            except ValueError:
+                self.text_var.set(value)
+                return
+            self._set_half("AM" if t.hour < 12 else "PM")
+            self.text_var.set(f"{t.hour % 12 or 12}:{t.minute:02d}")
+        finally:
+            self._syncing = False
 
 
 @dataclass

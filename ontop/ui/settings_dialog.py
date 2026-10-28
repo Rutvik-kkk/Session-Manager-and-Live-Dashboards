@@ -8,10 +8,10 @@ from tkinter import ttk
 from typing import Callable
 
 from .. import config
-from ..formatting import paise_to_input, parse_money, parse_time
+from ..formatting import fmt_clock, paise_to_input, parse_money, parse_time
 from ..settings import AppSettings
 from . import dialogs, theme
-from .widgets import card
+from .widgets import TimeField, card
 
 GROUPS = tuple(config.HOURLY_RATES_PAISE)
 
@@ -30,6 +30,7 @@ class SettingsDialog(tk.Toplevel):
 
         self.opening_var = tk.StringVar()
         self.closing_var = tk.StringVar()
+        self.clock_var = tk.BooleanVar(value=current.clock_24h)
         self.rate_vars = {g: {n: tk.StringVar() for n in config.PLAYER_COUNTS} for g in GROUPS}
         self.half_vars = {g: tk.StringVar() for g in GROUPS}
         self.pass_price_var = tk.StringVar()
@@ -53,11 +54,18 @@ class SettingsDialog(tk.Toplevel):
 
         outer, f = card(body, padding=(16, 12))
         outer.pack(fill="x", pady=(0, 10))
-        ttk.Label(f, text="Opening hours", style="CardSection.TLabel").grid(row=0, column=0, columnspan=4, sticky="w")
+        ttk.Label(f, text="Opening hours & clock", style="CardSection.TLabel").grid(
+            row=0, column=0, columnspan=4, sticky="w")
         ttk.Label(f, text="Opens at", style="CardMuted.TLabel").grid(row=1, column=0, sticky="w", pady=6)
-        ttk.Entry(f, textvariable=self.opening_var, width=8).grid(row=1, column=1, sticky="w", padx=(8, 20))
+        TimeField(f, self.opening_var).grid(row=1, column=1, sticky="w", padx=(8, 20))
         ttk.Label(f, text="Closes at", style="CardMuted.TLabel").grid(row=1, column=2, sticky="w")
-        ttk.Entry(f, textvariable=self.closing_var, width=8).grid(row=1, column=3, sticky="w", padx=(8, 0))
+        TimeField(f, self.closing_var).grid(row=1, column=3, sticky="w", padx=(8, 0))
+        ttk.Label(f, text="Clock", style="CardMuted.TLabel").grid(row=2, column=0, sticky="w", pady=(4, 0))
+        clock = ttk.Frame(f, style="Inner.TFrame")
+        clock.grid(row=2, column=1, columnspan=3, sticky="w", padx=(8, 0), pady=(4, 0))
+        for value, text in ((True, "24-hour (18:30)"), (False, "12-hour (6:30 PM)")):
+            ttk.Radiobutton(clock, text=text, value=value, variable=self.clock_var,
+                            style="Card.TRadiobutton").pack(side="left", padx=(0, 16))
 
         outer, f = card(body, padding=(16, 12))
         outer.pack(fill="x", pady=(0, 10))
@@ -107,11 +115,12 @@ class SettingsDialog(tk.Toplevel):
         self.geometry(f"+{max(x, 0)}+{max(y, 0)}")
 
     def _defaults(self) -> AppSettings:
-        return AppSettings(theme=self.current.theme)
+        return AppSettings(theme=self.current.theme, clock_24h=self.current.clock_24h)
 
     def _fill(self, s: AppSettings):
-        self.opening_var.set(s.opening)
-        self.closing_var.set(s.closing)
+        self.opening_var.set(fmt_clock(parse_time(s.opening)))
+        self.closing_var.set(fmt_clock(parse_time(s.closing)))
+        self.clock_var.set(s.clock_24h)
         for group in GROUPS:
             for players in config.PLAYER_COUNTS:
                 self.rate_vars[group][players].set(paise_to_input(s.hourly_rates_paise[group][players]))
@@ -157,6 +166,7 @@ class SettingsDialog(tk.Toplevel):
             pass_price_paise=money(self.pass_price_var, "Pass price"),
             pass_hours=whole(self.pass_hours_var, "Pass hours"),
             pass_valid_days=whole(self.pass_days_var, "Pass validity"),
+            clock_24h=bool(self.clock_var.get()),
         )
         if not errors:
             errors = result.problems()

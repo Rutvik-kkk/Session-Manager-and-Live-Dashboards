@@ -1,4 +1,4 @@
-"""User-editable settings (theme, opening hours, prices, pass terms) kept in settings.json.
+"""User-editable settings (theme, clock format, opening hours, prices, pass terms) kept in settings.json.
 
 Settings are applied to :mod:`ontop.config` once at startup, before the rest of
 the app is imported, so every module sees the same values. Changes made in the
@@ -14,7 +14,7 @@ from dataclasses import asdict, dataclass, field
 from datetime import time
 from pathlib import Path
 
-from . import config
+from . import config, formatting
 
 SETTINGS_FILE = "settings.json"
 DEFAULT_THEME = "Midnight"
@@ -34,9 +34,12 @@ class AppSettings:
     pass_price_paise: int = config.PASS_DEFAULT_PRICE_PAISE
     pass_hours: int = config.PASS_HOURS
     pass_valid_days: int = config.PASS_VALID_DAYS
+    clock_24h: bool = True
 
     def problems(self) -> list[str]:
         errors = []
+        if not isinstance(self.clock_24h, bool):
+            errors.append("Clock format must be true (24-hour) or false (12-hour).")
         try:
             opening, closing = _parse_hhmm(self.opening), _parse_hhmm(self.closing)
             if closing <= opening:
@@ -124,3 +127,4 @@ def apply(settings: AppSettings) -> None:
     config.PASS_DEFAULT_PRICE_PAISE = settings.pass_price_paise
     config.PASS_HOURS = settings.pass_hours
     config.PASS_VALID_DAYS = settings.pass_valid_days
+    formatting.CLOCK_24H = settings.clock_24h

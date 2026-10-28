@@ -44,6 +44,7 @@ from ..analytics import (  # noqa: E402
     summarize,
     time_series,
 )
+from .. import formatting  # noqa: E402
 from ..config import CLOSING_TIME, OPENING_TIME  # noqa: E402
 from ..formatting import (  # noqa: E402
     fmt_date,
@@ -645,9 +646,13 @@ class DashboardTab(ttk.Frame):
         if len(hours) <= 16:
             ax.bar_label(bars, labels=[str(v) if v else "" for v in values], color=theme.TEXT, fontsize=8.5, padding=2)
         ax.set_xticks(range(len(hours)))
-        ax.set_xticklabels([f"{h:02d}" for h in hours])
+        if formatting.CLOCK_24H:
+            ax.set_xticklabels([f"{h:02d}" for h in hours])
+            ax.set_xlabel("Hour of day (e.g. 14 = 14:00–15:00)")
+        else:
+            ax.set_xticklabels([f"{h % 12 or 12}{'a' if h < 12 else 'p'}" for h in hours])
+            ax.set_xlabel("Hour of day (e.g. 2p = 2:00–3:00 PM)")
         ax.set_xlim(-0.6, len(hours) - 0.4)
-        ax.set_xlabel("Hour of day (e.g. 14 = 14:00–15:00)")
         ax.yaxis.set_major_locator(MaxNLocator(integer=True))
         ax.set_ylabel("Sessions")
         self._headroom(ax, values)

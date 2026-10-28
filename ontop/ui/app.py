@@ -118,6 +118,12 @@ class OnTopApp:
             themes.add_radiobutton(label=name, value=name, variable=self.theme_var,
                                    command=lambda n=name: self.choose_theme(n))
         self.menu.add_cascade(label="Theme", menu=themes)
+        self.clock_var = tk.BooleanVar(value=self.settings.clock_24h)
+        clock = tk.Menu(self.menu, tearoff=False, **colors)
+        for value, label in ((True, "24-hour (18:30)"), (False, "12-hour (6:30 PM)")):
+            clock.add_radiobutton(label=label, value=value, variable=self.clock_var,
+                                  command=lambda v=value: self.choose_clock(v))
+        self.menu.add_cascade(label="Clock format", menu=clock)
         self.menu.add_separator()
         self.menu.add_command(label="Exit", command=self.request_exit)
 
@@ -134,6 +140,12 @@ class OnTopApp:
             return
         if not self._save_settings(dataclasses.replace(self.settings, theme=name), what="Theme"):
             self.theme_var.set(self.settings.theme)
+
+    def choose_clock(self, clock_24h: bool):
+        if clock_24h == self.settings.clock_24h:
+            return
+        if not self._save_settings(dataclasses.replace(self.settings, clock_24h=clock_24h), what="Clock format"):
+            self.clock_var.set(self.settings.clock_24h)
 
     def _save_settings(self, new: AppSettings, what: str = "Settings") -> bool:
         try:

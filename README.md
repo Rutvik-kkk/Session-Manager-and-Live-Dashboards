@@ -32,7 +32,8 @@ Opening hours, prices and pass terms can be changed in **☰ menu → General se
 `settings.json` in the data folder and take effect after a restart; the defaults below live in `ontop/config.py`.
 The ☰ menu also has **Theme** and **Exit**. Midnight keeps the original square look; Dusk Blue, Lavender Haze,
 Alpine Dusk, Twinkle Sand, Violet Glass and Forest Lodge use rounded, borderless cards, buttons and fields
-(palettes live in `ontop/ui/theme.py`).
+(palettes live in `ontop/ui/theme.py`). **Clock format** (also in General settings) switches between 24-hour (18:30)
+and 12-hour (6:30 PM) times; in 12-hour mode the start and end time fields get an AM/PM button.
 
 - **Opening hours** 09:00–22:00. New or changed sessions must start and end inside them (no overnight sessions).
 - **Price list** (per hour):
@@ -74,7 +75,7 @@ Alpine Dusk, Twinkle Sand, Violet Glass and Forest Lodge use rounded, borderless
 
 ## Date and time formats
 
-- Inputs: dates `YYYY-MM-DD`, times 24-hour `HH:MM`, in the computer's local timezone.
+- Inputs: dates `YYYY-MM-DD`, times `18:30` or `6:30 PM` (shown in the chosen clock format), in the computer's local timezone.
 - Stored timestamps are ISO 8601 with a UTC offset, e.g. `2026-10-27T21:30:00+05:30`.
 - Each session stores `start`, `end`, `duration_minutes`, `players`, `pass_id`, `notes`, `entry_time` (first
   successful save, never changed), `last_updated` and `extension_history`.
