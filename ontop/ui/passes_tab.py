@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import tkinter as tk
 from dataclasses import dataclass
-from tkinter import messagebox, ttk
+from tkinter import ttk
 from typing import TYPE_CHECKING
 
 from ..config import PASS_DEFAULT_PRICE_PAISE, PASS_HOURS, PASS_VALID_DAYS
@@ -33,7 +33,7 @@ from ..models import (
     prepare_pass,
 )
 from ..storage import StorageError
-from . import theme
+from . import dialogs, theme
 from .widgets import Column, DateEntry, SortableTree, Tooltip, card
 
 if TYPE_CHECKING:
@@ -222,7 +222,7 @@ class PassesTab(ttk.Frame):
     def save(self):
         store = self.app.store
         if store.read_only:
-            messagebox.showerror("Saving disabled", store.load_error or "The data file could not be loaded.", parent=self)
+            dialogs.showerror("Saving disabled", store.load_error or "The data file could not be loaded.", parent=self)
             return
         try:
             p = prepare_pass(holder_name=self.name_var.get(), phone_text=self.phone_var.get(),
@@ -233,10 +233,10 @@ class PassesTab(ttk.Frame):
             else:
                 store.add_pass(p)
         except ValidationError as exc:
-            messagebox.showerror("Please fix the following", "\n".join(f"• {e}" for e in exc.errors), parent=self)
+            dialogs.showerror("Please fix the following", "\n".join(f"• {e}" for e in exc.errors), parent=self)
             return
         except StorageError as exc:
-            messagebox.showerror("Could not save", f"{exc}\n\nYour entries are still in the form.", parent=self)
+            dialogs.showerror("Could not save", f"{exc}\n\nYour entries are still in the form.", parent=self)
             return
         updating = self._editing is not None
         self.clear_form()
@@ -244,7 +244,7 @@ class PassesTab(ttk.Frame):
         self.table.tree.selection_set(p.id) if self.table.tree.exists(p.id) else None
         verb = "Updated" if updating else "Registered"
         self.app.set_status(f"{verb} monthly pass for {p.holder_name} ({fmt_phone(p.phone)}).")
-        messagebox.showinfo(
+        dialogs.showinfo(
             f"Pass {verb.lower()}",
             f"{verb} monthly pass for {p.holder_name}\nPhone {fmt_phone(p.phone)}\n"
             f"{p.hours} hours · valid {fmt_date_long(p.purchased_on)} – {fmt_date_long(p.valid_until)}\n"
@@ -255,7 +255,7 @@ class PassesTab(ttk.Frame):
     def edit_selected(self):
         p = self.app.store.get_pass(self.table.selected_id() or "")
         if p is None:
-            messagebox.showinfo("Edit pass", "Select a pass in the list first.", parent=self)
+            dialogs.showinfo("Edit pass", "Select a pass in the list first.", parent=self)
             return
         self._editing = p
         self.name_var.set(p.holder_name)
@@ -273,11 +273,11 @@ class PassesTab(ttk.Frame):
     def start_session(self):
         p = self.app.store.get_pass(self.table.selected_id() or "")
         if p is None:
-            messagebox.showinfo("Start session", "Select a pass in the list first.", parent=self)
+            dialogs.showinfo("Start session", "Select a pass in the list first.", parent=self)
             return
         used = self.app.store.pass_used_minutes(p.id)
         state = pass_state(p, used, today_local())
-        if state != PASS_ACTIVE and not messagebox.askyesno(
+        if state != PASS_ACTIVE and not dialogs.askyesno(
             "Pass not active",
             f"This pass is '{state}'. Open a session for it anyway (for example to enter a past session)?",
             parent=self,

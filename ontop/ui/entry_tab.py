@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import tkinter as tk
 from datetime import timedelta
-from tkinter import messagebox, ttk
+from tkinter import ttk
 from typing import TYPE_CHECKING
 
 from ..config import CLOSING_TIME, DEVICES, OPENING_TIME, PLAYER_COUNTS
@@ -52,7 +52,7 @@ from ..models import (
 )
 from ..pricing import billable_minutes, charge_explanation, players_problem, suggested_charge
 from ..storage import StorageError
-from . import theme
+from . import dialogs, theme
 from .widgets import DateEntry, ScrollableFrame, Tooltip, card
 
 if TYPE_CHECKING:
@@ -449,7 +449,7 @@ class SessionEntryTab(ttk.Frame):
 
     def _confirm_clear(self):
         if self.name_var.get().strip() or self.phone_var.get().strip() or self._notes().strip():
-            if not messagebox.askyesno("Clear form", "Clear all fields in this form?", parent=self):
+            if not dialogs.askyesno("Clear form", "Clear all fields in this form?", parent=self):
                 return
         self.clear_form()
 
@@ -459,10 +459,10 @@ class SessionEntryTab(ttk.Frame):
     def load_session(self, session_id: str) -> bool:
         session = self.app.store.get(session_id)
         if session is None:
-            messagebox.showerror("Session not found", "That session no longer exists.", parent=self)
+            dialogs.showerror("Session not found", "That session no longer exists.", parent=self)
             return False
         if self._editing and self._editing.id != session_id:
-            if not messagebox.askyesno(
+            if not dialogs.askyesno(
                 "Discard current edit?",
                 f"You are editing {self._editing.customer_name}'s session. Discard those unsaved changes "
                 f"and edit {session.customer_name}'s session instead?",
@@ -520,7 +520,7 @@ class SessionEntryTab(ttk.Frame):
 
     def start_with_pass(self, p: MonthlyPass):
         """Prepare a new session for a pass holder (used from the Monthly Passes tab)."""
-        if self._editing and not messagebox.askyesno(
+        if self._editing and not dialogs.askyesno(
             "Discard current edit?", "Discard the session you are editing and start a new pass session?",
             parent=self,
         ):
@@ -792,7 +792,7 @@ class SessionEntryTab(ttk.Frame):
     def extend(self, minutes: int | None = None):
         def fail(title: str, text: str):
             self.extend_msg.configure(text=text, style="CardError.TLabel")
-            messagebox.showerror(title, text, parent=self)
+            dialogs.showerror(title, text, parent=self)
 
         if minutes is None:
             raw = self.extend_var.get().strip()
@@ -950,7 +950,7 @@ class SessionEntryTab(ttk.Frame):
     def _persist(self, updating: bool) -> Session | None:
         store = self.app.store
         if store.read_only:
-            messagebox.showerror("Saving disabled", store.load_error or "The data file could not be loaded.", parent=self)
+            dialogs.showerror("Saving disabled", store.load_error or "The data file could not be loaded.", parent=self)
             return None
         try:
             session = self._build_session()
@@ -959,13 +959,13 @@ class SessionEntryTab(ttk.Frame):
             else:
                 store.add(session)
         except ConflictError as exc:
-            messagebox.showerror("Device unavailable", str(exc), parent=self)
+            dialogs.showerror("Device unavailable", str(exc), parent=self)
             return None
         except ValidationError as exc:
-            messagebox.showerror("Please fix the following", bullet_list(exc.errors), parent=self)
+            dialogs.showerror("Please fix the following", bullet_list(exc.errors), parent=self)
             return None
         except StorageError as exc:
-            messagebox.showerror(
+            dialogs.showerror(
                 "Could not save",
                 f"{exc}\n\nNothing was changed and your entries are still in the form, so you can try again.",
                 parent=self,
@@ -998,7 +998,7 @@ class SessionEntryTab(ttk.Frame):
         self.clear_form()
         self.app.data_changed()
         self.app.set_status(f"Saved {session.customer_name} on {session.device}.")
-        messagebox.showinfo("Session saved", "Saved session:\n" + self._summary(session), parent=self)
+        dialogs.showinfo("Session saved", "Saved session:\n" + self._summary(session), parent=self)
 
     def update(self):
         if not self._editing:
@@ -1012,4 +1012,4 @@ class SessionEntryTab(ttk.Frame):
         self.app.data_changed()
         self.app.set_status(f"Updated {session.customer_name}'s session.")
         extra = f"\nIncludes {added} min of new extensions." if added else ""
-        messagebox.showinfo("Session updated", "Updated session:\n" + self._summary(session) + extra, parent=self)
+        dialogs.showinfo("Session updated", "Updated session:\n" + self._summary(session) + extra, parent=self)

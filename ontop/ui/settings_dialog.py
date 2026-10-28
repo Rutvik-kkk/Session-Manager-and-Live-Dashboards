@@ -4,13 +4,13 @@ from __future__ import annotations
 
 import dataclasses
 import tkinter as tk
-from tkinter import messagebox, ttk
+from tkinter import ttk
 from typing import Callable
 
 from .. import config
 from ..formatting import paise_to_input, parse_money, parse_time
 from ..settings import AppSettings
-from . import theme
+from . import dialogs, theme
 from .widgets import card
 
 GROUPS = tuple(config.HOURLY_RATES_PAISE)
@@ -176,7 +176,7 @@ class SettingsDialog(tk.Toplevel):
         try:
             saved = self.on_save(result)
         except OSError as exc:
-            messagebox.showerror("Could not save settings", str(exc), parent=self)
+            dialogs.showerror("Could not save settings", str(exc), parent=self)
             return
         if saved:
             self.destroy()

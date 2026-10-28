@@ -11,6 +11,7 @@ import tempfile
 import tkinter as tk
 import unittest
 from pathlib import Path
+from tkinter import ttk
 from unittest import mock
 
 from ontop.formatting import fmt_date, now_local
@@ -34,9 +35,9 @@ class GuiWorkflowTests(unittest.TestCase):
         self.store = SessionStore(self.path)
         self.store.load()
         self.patches = [
-            mock.patch("tkinter.messagebox.showinfo"),
-            mock.patch("tkinter.messagebox.showerror"),
-            mock.patch("tkinter.messagebox.askyesno", return_value=True),
+            mock.patch("ontop.ui.dialogs.showinfo"),
+            mock.patch("ontop.ui.dialogs.showerror"),
+            mock.patch("ontop.ui.dialogs.askyesno", return_value=True),
         ]
         self.info, self.error, self.ask = (p.start() for p in self.patches)
         self.root = tk.Tk()
@@ -127,6 +128,24 @@ class GuiWorkflowTests(unittest.TestCase):
         self.assertIn("past closing time", e.timing_error.cget("text"))
         e.start_var.set("08:00")
         self.assertIn("opens at 09:00", e.timing_error.cget("text"))
+
+    def test_themed_message_dialog(self):
+        from ontop.ui import theme
+        from ontop.ui.dialogs import MessageDialog
+
+        def buttons(widget):
+            for child in widget.winfo_children():
+                if isinstance(child, ttk.Button):
+                    yield child
+                yield from buttons(child)
+
+        for label, expected in (("Yes", True), ("No", False)):
+            d = MessageDialog(self.root, "Discard?", "Discard changes?", "question", ("Yes", "No"), "Yes")
+            self.assertEqual(str(d.cget("background")), theme.SURFACE)
+            found = {b.cget("text"): b for b in buttons(d)}
+            self.assertEqual(sorted(found), ["No", "Yes"])
+            found[label].invoke()
+            self.assertEqual(d.result, expected)
 
     def test_duration_buttons_step_by_hour_and_half_hour(self):
         e = self.e
@@ -353,7 +372,7 @@ class GuiReadOnlyTests(unittest.TestCase):
             path.write_text("not json")
             store = SessionStore(path)
             store.load()
-            with mock.patch("tkinter.messagebox.showerror") as err, mock.patch("tkinter.messagebox.showinfo"):
+            with mock.patch("ontop.ui.dialogs.showerror") as err, mock.patch("ontop.ui.dialogs.showinfo"):
                 root = tk.Tk()
                 try:
                     app = OnTopApp(root, store)

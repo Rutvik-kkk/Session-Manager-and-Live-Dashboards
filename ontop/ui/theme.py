@@ -6,6 +6,7 @@ chosen with set_palette() before the window is built.
 
 from __future__ import annotations
 
+import sys
 import tkinter as tk
 from tkinter import font as tkfont
 from tkinter import ttk
@@ -294,6 +295,30 @@ def apply_theme(root: tk.Tk) -> None:
 
     if CURRENT_THEME not in CLASSIC_THEMES:
         _apply_rounded_shapes(root, style)
+
+    for cls in ("Tk", "Toplevel"):
+        root.bind_class(cls, "<Map>", lambda e: color_title_bar(e.widget), add="+")
+
+
+def color_title_bar(window: tk.Misc) -> None:
+    """Paint a window's Windows title bar in its background colour (Windows 11; ignored elsewhere)."""
+    if sys.platform != "win32" or not isinstance(window, (tk.Tk, tk.Toplevel)):
+        return
+    try:
+        import ctypes
+
+        hwnd = int(window.wm_frame(), 16)
+        background = str(window.cget("background"))
+
+        def colorref(color: str) -> int:
+            r, g, b = _rgb(color)
+            return r | g << 8 | b << 16
+
+        for attribute, value in ((20, 1), (35, colorref(background)), (36, colorref(TEXT)), (34, colorref(BORDER))):
+            data = ctypes.c_int(value)
+            ctypes.windll.dwmapi.DwmSetWindowAttribute(hwnd, attribute, ctypes.byref(data), ctypes.sizeof(data))
+    except (OSError, ValueError, AttributeError, tk.TclError):
+        pass
 
 
 def _rounded_image(root: tk.Misc, fill: str, radius: int, outline: str | None, size: tuple[int, int],

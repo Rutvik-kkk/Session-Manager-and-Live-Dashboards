@@ -46,6 +46,7 @@ def main(argv: list[str] | None = None) -> int:
     app_settings.apply(settings)
 
     from ontop.storage import InstanceLock, InstanceLockError, SessionStore
+    from ontop.ui import dialogs
     from ontop.ui.app import APP_TITLE, OnTopApp, maximize
 
     enable_sharp_rendering()
@@ -73,7 +74,7 @@ def main(argv: list[str] | None = None) -> int:
         root.deiconify()
         maximize(root)
         if settings_warning:
-            root.after(500, lambda: messagebox.showwarning("Settings not loaded", settings_warning, parent=root))
+            root.after(500, lambda: dialogs.showwarning("Settings not loaded", settings_warning, parent=root))
         root.mainloop()
     finally:
         lock.release()

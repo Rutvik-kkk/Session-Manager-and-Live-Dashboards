@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import tkinter as tk
-from tkinter import messagebox, ttk
+from tkinter import ttk
 from typing import TYPE_CHECKING
 
 from ..analytics import SessionFilter, filter_sessions, summarize
 from ..formatting import fmt_date, fmt_datetime, fmt_duration, fmt_money, parse_date
 from ..models import DEVICES, PAYMENT_STATUSES, STATUS_PAID, Session
+from . import dialogs
 from .widgets import Column, DateEntry, SortableTree, Tooltip, card
 
 if TYPE_CHECKING:
@@ -173,6 +174,6 @@ class PreviousEntriesTab(ttk.Frame):
     def edit_selected(self):
         sid = self.table.selected_id()
         if not sid:
-            messagebox.showinfo("Edit session", "Select a session in the list first.", parent=self)
+            dialogs.showinfo("Edit session", "Select a session in the list first.", parent=self)
             return
         self.app.edit_session(sid)

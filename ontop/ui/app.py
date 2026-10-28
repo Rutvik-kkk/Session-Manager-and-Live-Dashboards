@@ -5,13 +5,13 @@ from __future__ import annotations
 import dataclasses
 import tkinter as tk
 from pathlib import Path
-from tkinter import messagebox, ttk
+from tkinter import ttk
 
 from ..formatting import fmt_datetime_long, fmt_offset, now_local
 from ..settings import AppSettings, settings_path
 from ..settings import save as save_settings
 from ..storage import SessionStore
-from . import theme
+from . import dialogs, theme
 from .dashboard_tab import DashboardTab
 from .entries_tab import PreviousEntriesTab
 from .entry_tab import SessionEntryTab
@@ -139,10 +139,10 @@ class OnTopApp:
         try:
             save_settings(self.settings_file, new)
         except (OSError, ValueError) as exc:
-            messagebox.showerror("Could not save settings", str(exc), parent=self.root)
+            dialogs.showerror("Could not save settings", str(exc), parent=self.root)
             return False
         self.settings = new
-        if messagebox.askyesno(
+        if dialogs.askyesno(
             "Restart to apply",
             f"{what} saved. Restart the app now to apply the change?\n\n"
             "If you choose No, it will apply the next time the app starts.",
@@ -161,7 +161,7 @@ class OnTopApp:
         question = f"{action} On Top Gaming?"
         if unsaved:
             question += "\n\nThe session form has information that hasn't been saved; it will be lost."
-        if (unsaved or not confirmed) and not messagebox.askyesno(
+        if (unsaved or not confirmed) and not dialogs.askyesno(
             action, question, icon="warning" if unsaved else "question", parent=self.root
         ):
             return
@@ -194,7 +194,7 @@ class OnTopApp:
             self.mapping.stop_timer()
 
     def show_load_error(self):
-        messagebox.showerror(
+        dialogs.showerror(
             "Data file problem",
             f"{self.store.load_error}\n\nThe file has been preserved exactly as it is and the app will not "
             "save over it. Fix or move the file (for example restore a backup), then restart the app. "
