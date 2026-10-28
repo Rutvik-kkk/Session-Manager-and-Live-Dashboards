@@ -28,7 +28,9 @@ python -m unittest discover -s tests -v
 
 ## Business rules
 
-All of these live in `ontop/config.py`; change them there.
+Opening hours, prices and pass terms can be changed in **☰ menu → General settings**. They are saved in
+`settings.json` in the data folder and take effect after a restart; the defaults below live in `ontop/config.py`.
+The ☰ menu also has **Theme** (Midnight, Ocean, Emerald, Sunset, Light) and **Exit**.
 
 - **Opening hours** 09:00–22:00. New or changed sessions must start and end inside them (no overnight sessions).
 - **Price list** (per hour):
@@ -51,7 +53,8 @@ All of these live in `ontop/config.py`; change them there.
 - A pass session deducts its billed time (30-minute blocks) from the pass. The holder pays nothing; extra
   players pay the difference between the group rate and the 1-player rate. If the pass doesn't have
   enough time left for the session, the app refuses it (shorten the session or book it without the pass).
-- Pass sales are shown on the dashboard as their own card and are not added to session revenue.
+- Pass sales are shown on the dashboard as their own card and in the Earnings chart, but are not added to
+  session charges or amount received.
 
 ## Storage
 
@@ -96,15 +99,20 @@ cover the filtered rows.
 **Session Mapping**: a daily 09:00–22:00 timeline with one lane per device, coloured by payment status.
 ★ marks pass sessions and 2P–4P shows the player count. Click a bar for details and **Edit Session**.
 
-**Dashboard**: choose a date range, device, method, status, customer and grouping, then **Apply Filters**.
-The cards, charts and breakdown table use the same filtered sessions. "Amount received" is money received
-against those sessions, not cash collected in the date range, and not profit.
+**Dashboard**: choose a date range (including This Week and This Year), device, method, status, customer and
+grouping, then **Apply Filters**. The cards, charts and breakdown table use the same filtered sessions.
+"Amount received" is money received against those sessions, not cash collected in the date range, and not
+profit. **Earnings** shows money received per day (or week/month): session payments plus monthly pass sales.
+**Busy hours** shows how many sessions were playing during each hour; it has its own This Week / This Month /
+This Year selector, and the other filters still apply.
 
 ## Project layout
 
 ```
 main.py                   startup, single-instance lock, window
-ontop/config.py           devices, opening hours, price list, pass settings
+ontop/config.py           devices and default opening hours, price list, pass settings
+ontop/settings.py         settings.json load/save, applied to config at startup
+ontop/ui/settings_dialog.py  General settings dialog
 ontop/pricing.py          price-list calculations
 ontop/formatting.py       date/time/money parsing and formatting
 ontop/models.py           Session and MonthlyPass records, validation, booking rules

@@ -18,6 +18,7 @@ from matplotlib.figure import Figure  # noqa: E402
 from matplotlib.ticker import FuncFormatter, MaxNLocator  # noqa: E402
 
 from ..analytics import (  # noqa: E402
+    BUSY_PERIODS,
     DATE_PRESETS,
     DEVICE_METRICS,
     DEVICE_SORTS,
@@ -28,20 +29,22 @@ from ..analytics import (  # noqa: E402
     METRIC_HOURS,
     PRESET_CUSTOM,
     PRESET_LAST_7,
+    PRESET_THIS_MONTH,
     SORT_DEVICE_NAME,
     SessionFilter,
     bucket_label,
+    busy_hour_counts,
     device_stats,
+    earnings_series,
     filter_sessions,
     passes_sold,
     preset_range,
     received_by_method,
     sort_device_stats,
-    start_hour_counts,
-    status_counts,
     summarize,
     time_series,
 )
+from ..config import CLOSING_TIME, OPENING_TIME  # noqa: E402
 from ..formatting import (  # noqa: E402
     fmt_date,
     fmt_date_long,
@@ -144,6 +147,7 @@ class DashboardTab(ttk.Frame):
         self.dev_metric_var = tk.StringVar(value=METRIC_COUNT)
         self.dev_sort_var = tk.StringVar(value=SORT_DEVICE_NAME)
         self.dev_order_var = tk.StringVar(value=ASCENDING)
+        self.busy_period_var = tk.StringVar(value=PRESET_THIS_MONTH)
 
         self.applied = DashboardFilters()
         self.rows: list[Session] = []
@@ -160,6 +164,7 @@ class DashboardTab(ttk.Frame):
             var.trace_add("write", lambda *_: self._mark_dirty())
         for var in (self.dev_metric_var, self.dev_sort_var, self.dev_order_var):
             var.trace_add("write", lambda *_: self._render_chart("device", self._draw_devices))
+        self.busy_period_var.trace_add("write", lambda *_: self._render_busy())
 
     # ------------------------------------------------------------------
     # Layout
@@ -201,12 +206,11 @@ class DashboardTab(ttk.Frame):
         self.chart_cards: dict[str, ttk.Frame] = {}
         self.holders: dict[str, ttk.Frame] = {}
         specs = [
-            ("financial", "Financial trend", "Total charges vs amount received"),
+            ("earnings", "Earnings", "Money received: session payments + monthly pass sales"),
             ("activity", "Session activity", "Number of sessions"),
             ("device", "Device comparison", None),
-            ("status", "Payment status", "Number of sessions by status"),
             ("methods", "Payment methods", "Amount received, attributed to each session's saved method"),
-            ("hours", "Busiest start hours", "Sessions starting in each hour (local time)"),
+            ("busy", "Busy hours", "Sessions playing during each hour"),
         ]
         for key, title, subtitle in specs:
             outer, inner = card(self.charts_frame, padding=12)
@@ -217,7 +221,9 @@ class DashboardTab(ttk.Frame):
                 ttk.Label(top, text=subtitle, style="CardSmall.TLabel").pack(side="left", padx=10, pady=(3, 0))
             if key == "device":
                 self._build_device_controls(inner)
-            holder = ttk.Frame(inner, style="Inner.TFrame", height=CHART_HEIGHT)
+            elif key == "busy":
+                self._build_busy_controls(inner)
+            holder = ttk.Frame(inner, style="Inner.TFrame", height=theme.px(CHART_HEIGHT))
             holder.pack(fill="both", expand=True, pady=(6, 0))
             holder.pack_propagate(False)
             self.chart_cards[key] = outer
@@ -297,6 +303,15 @@ class DashboardTab(ttk.Frame):
         ttk.Combobox(row, textvariable=self.dev_order_var, values=(ASCENDING, DESCENDING), state="readonly",
                      width=11).pack(side="left")
 
+    def _build_busy_controls(self, parent):
+        row = ttk.Frame(parent, style="Inner.TFrame")
+        row.pack(fill="x", pady=(6, 0))
+        ttk.Label(row, text="Period", style="CardMuted.TLabel").pack(side="left")
+        ttk.Combobox(row, textvariable=self.busy_period_var, values=BUSY_PERIODS, state="readonly",
+                     width=12).pack(side="left", padx=(6, 12))
+        self.busy_note = ttk.Label(row, style="CardSmall.TLabel")
+        self.busy_note.pack(side="left")
+
     def _layout_cards(self, event):
         cols = 5 if event.width >= 1200 else 2 if event.width >= 560 else 1
         if cols == self._card_cols:
@@ -315,8 +330,11 @@ class DashboardTab(ttk.Frame):
         self._chart_cols = cols
         for c in range(2):
             self.charts_frame.columnconfigure(c, weight=1 if c < cols else 0, uniform="charts" if c < cols else "")
+        n = len(self.chart_cards)
         for i, outer in enumerate(self.chart_cards.values()):
-            outer.grid(row=i // cols, column=i % cols, sticky="nsew", padx=(0 if i % cols == 0 else 10, 0), pady=(0, 10))
+            span = cols if i == n - 1 and n % cols else 1
+            outer.grid(row=i // cols, column=i % cols, columnspan=span, sticky="nsew",
+                       padx=(0 if i % cols == 0 else 10, 0), pady=(0, 10))
 
     # ------------------------------------------------------------------
     # Filters
@@ -411,12 +429,11 @@ class DashboardTab(ttk.Frame):
         )
 
         self._update_cards()
-        self._render_chart("financial", self._draw_financial)
+        self._render_chart("earnings", self._draw_earnings, has_data=bool(self.rows or self._passes_in_range()))
         self._render_chart("activity", self._draw_activity)
         self._render_chart("device", self._draw_devices)
-        self._render_chart("status", self._draw_status)
         self._render_chart("methods", self._draw_methods)
-        self._render_chart("hours", self._draw_hours)
+        self._render_busy()
 
         self.table.set_items(self.rows)
         if self.rows:
@@ -442,10 +459,7 @@ class DashboardTab(ttk.Frame):
             f"{sum(1 for r in self.rows if r.balance_paise > 0)} session(s) with a balance")
         put("avg_duration", fmt_duration(round(s.average_minutes)) if s.count else "—", "per session")
         put("avg_charge", fmt_money(s.average_charge_paise) if s.count else "—", "per session")
-        flt = self.applied
-        start, end = self._range
-        sold = passes_sold(self.app.store.passes, start, end,
-                           flt.method if flt.method in PAYMENT_METHODS else None, flt.search)
+        sold = self._passes_in_range()
         put("pass_sales", fmt_money(sum(p.price_paise for p in sold)),
             f"{len(sold)} pass{'es' if len(sold) != 1 else ''} bought in range")
         put("pass_hours", fmt_hours(s.pass_minutes), f"{s.pass_sessions} pass session(s)")
@@ -454,7 +468,28 @@ class DashboardTab(ttk.Frame):
     # Charts
     # ------------------------------------------------------------------
 
-    def _render_chart(self, key: str, draw: Callable):
+    def _passes_in_range(self):
+        flt = self.applied
+        start, end = self._range
+        return passes_sold(self.app.store.passes, start, end,
+                           flt.method if flt.method in PAYMENT_METHODS else None, flt.search)
+
+    def _busy_rows(self) -> list[Session]:
+        """Sessions matching every applied filter except the date range, which comes from the chart's own period."""
+        today = today_local()
+        start, end = preset_range(self.busy_period_var.get(), today)
+        flt = dataclasses.replace(self.applied.session_filter(today), start_date=start, end_date=end)
+        return filter_sessions(self.app.store.sessions, flt)
+
+    def _render_busy(self):
+        rows = self._busy_rows()
+        start, end = preset_range(self.busy_period_var.get(), today_local())
+        n = len(rows)
+        self.busy_note.configure(text=f"{fmt_date(start)} – {fmt_date(end)} · {n} session{'s' if n != 1 else ''} · "
+                                      "other filters still apply")
+        self._render_chart("busy", lambda ax: self._draw_busy(ax, rows), has_data=bool(rows))
+
+    def _render_chart(self, key: str, draw: Callable, has_data: bool | None = None):
         holder = self.holders[key]
         old = self._charts.pop(key, None)
         if old is not None:
@@ -465,10 +500,11 @@ class DashboardTab(ttk.Frame):
                 widget.after_cancel(pending)
             widget.destroy()
             old_fig.clear()
-        fig = Figure(figsize=(6, CHART_HEIGHT / 100), dpi=100, facecolor=theme.SURFACE, layout="constrained")
+        dpi = 100 * theme.SCALE
+        fig = Figure(figsize=(6, theme.px(CHART_HEIGHT) / dpi), dpi=dpi, facecolor=theme.SURFACE, layout="constrained")
         ax = fig.add_subplot(111)
         self._style_axes(ax)
-        if self.rows:
+        if self.rows if has_data is None else has_data:
             draw(ax)
         else:
             self._empty(ax)
@@ -530,23 +566,26 @@ class DashboardTab(ttk.Frame):
         start, end = self._range
         return time_series(self.rows, self.applied.group, start, end)
 
-    def _draw_financial(self, ax):
-        buckets = self._series()
+    def _draw_earnings(self, ax):
+        start, end = self._range
+        buckets = earnings_series(self.rows, self._passes_in_range(), self.applied.group, start, end)
         labels = [bucket_label(b.start, self.applied.group) for b in buckets]
+        sessions = [b.sessions_paise / 100 for b in buckets]
+        passes = [b.passes_paise / 100 for b in buckets]
         totals = [b.total_paise / 100 for b in buckets]
-        paid = [b.paid_paise / 100 for b in buckets]
         x = list(range(len(buckets)))
         if len(buckets) <= 31:
-            w = 0.38
-            ax.bar([i - w / 2 for i in x], totals, w, label="Total charges", color=theme.ACCENT)
-            ax.bar([i + w / 2 for i in x], paid, w, label="Amount received", color=theme.SUCCESS)
+            ax.bar(x, sessions, 0.6, label="Sessions", color=theme.SUCCESS)
+            bars = ax.bar(x, passes, 0.6, bottom=sessions, label="Monthly passes", color=theme.INFO)
+            if len(buckets) <= 14:
+                ax.bar_label(bars, labels=[fmt_money_compact(t) if t else "" for t in totals],
+                             color=theme.TEXT, fontsize=8.5, padding=3)
         else:
-            ax.plot(x, totals, label="Total charges", color=theme.ACCENT, linewidth=1.8)
-            ax.plot(x, paid, label="Amount received", color=theme.SUCCESS, linewidth=1.8)
-            ax.fill_between(x, paid, color=theme.SUCCESS, alpha=0.12)
+            ax.plot(x, totals, label="Total earnings", color=theme.SUCCESS, linewidth=1.8)
+            ax.fill_between(x, totals, color=theme.SUCCESS, alpha=0.12)
         self._category_ticks(ax, labels)
         inr_axis(ax)
-        self._headroom(ax, totals + paid)
+        self._headroom(ax, totals)
         self._legend(ax)
 
     def _draw_activity(self, ax):
@@ -583,16 +622,6 @@ class DashboardTab(ttk.Frame):
         ax.bar_label(bars, labels=[fmt(v) for v in values], color=theme.TEXT, fontsize=9, padding=3)
         self._headroom(ax, values)
 
-    def _draw_status(self, ax):
-        counts = status_counts(self.rows)
-        names = list(counts.keys())
-        values = list(counts.values())
-        bars = ax.bar(names, values, 0.55, color=[theme.STATUS_COLORS[n] for n in names])
-        ax.bar_label(bars, labels=[str(v) for v in values], color=theme.TEXT, fontsize=9, padding=3)
-        ax.yaxis.set_major_locator(MaxNLocator(integer=True))
-        ax.set_ylabel("Sessions")
-        self._headroom(ax, values)
-
     def _draw_methods(self, ax):
         received = received_by_method(self.rows)
         names = list(received.keys())
@@ -603,17 +632,25 @@ class DashboardTab(ttk.Frame):
         inr_axis(ax)
         self._headroom(ax, values)
 
-    def _draw_hours(self, ax):
-        counts = start_hour_counts(self.rows)
-        peak = max(counts)
-        colors = [theme.WARNING if c == peak and c > 0 else theme.ACCENT for c in counts]
-        ax.bar(range(24), counts, 0.75, color=colors)
-        ax.set_xticks(range(0, 24, 2))
-        ax.set_xticklabels([f"{h:02d}:00" for h in range(0, 24, 2)], rotation=30, ha="right")
-        ax.set_xlim(-0.6, 23.6)
+    def _draw_busy(self, ax, rows: list[Session]):
+        counts = busy_hour_counts(rows)
+        used = [h for h, c in enumerate(counts) if c]
+        first = min([OPENING_TIME.hour, *used])
+        last = max([CLOSING_TIME.hour - (0 if CLOSING_TIME.minute else 1), *used])
+        hours = list(range(first, last + 1))
+        values = [counts[h] for h in hours]
+        peak = max(values)
+        colors = [theme.WARNING if v == peak and v > 0 else theme.ACCENT for v in values]
+        bars = ax.bar(range(len(hours)), values, 0.75, color=colors)
+        if len(hours) <= 16:
+            ax.bar_label(bars, labels=[str(v) if v else "" for v in values], color=theme.TEXT, fontsize=8.5, padding=2)
+        ax.set_xticks(range(len(hours)))
+        ax.set_xticklabels([f"{h:02d}" for h in hours])
+        ax.set_xlim(-0.6, len(hours) - 0.4)
+        ax.set_xlabel("Hour of day (e.g. 14 = 14:00–15:00)")
         ax.yaxis.set_major_locator(MaxNLocator(integer=True))
         ax.set_ylabel("Sessions")
-        self._headroom(ax, counts)
+        self._headroom(ax, values)
 
     # ------------------------------------------------------------------
 

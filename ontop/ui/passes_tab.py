@@ -122,8 +122,8 @@ class PassesTab(ttk.Frame):
         field(4, "Price (₹) *")
         price = ttk.Entry(f, textvariable=self.price_var, width=12)
         price.grid(row=4, column=1, sticky="w", pady=6)
-        Tooltip(price, f"Placeholder price: {fmt_money(PASS_DEFAULT_PRICE_PAISE)} "
-                       f"(80% of {PASS_HOURS} single-player PS5 hours). Change it in ontop/config.py.")
+        Tooltip(price, f"Default price: {fmt_money(PASS_DEFAULT_PRICE_PAISE)}. "
+                       "Change the default in ☰ Menu → General settings.")
         field(5, "Paid by *")
         ttk.Combobox(f, textvariable=self.method_var, values=PAYMENT_METHODS, state="readonly",
                      width=10).grid(row=5, column=1, sticky="w", pady=6)

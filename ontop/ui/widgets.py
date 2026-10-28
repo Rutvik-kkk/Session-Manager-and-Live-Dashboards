@@ -13,7 +13,7 @@ from ..formatting import DATE_FMT, parse_date, today_local
 from . import theme
 
 
-def card(master: tk.Misc, padding: int = 16) -> tuple[ttk.Frame, ttk.Frame]:
+def card(master: tk.Misc, padding: int | tuple[int, ...] = 16) -> tuple[ttk.Frame, ttk.Frame]:
     """A bordered surface; returns (outer, inner) where widgets go into inner."""
     outer = ttk.Frame(master, style="Card.TFrame")
     inner = ttk.Frame(outer, style="Inner.TFrame", padding=padding)
@@ -191,9 +191,9 @@ class CalendarPopup(tk.Toplevel):
             for col, day in enumerate(week):
                 in_month = day.month == self.month.month
                 bg = theme.SURFACE_2
-                fg = theme.TEXT if in_month else "#566074"
+                fg = theme.TEXT if in_month else theme.DISABLED
                 if day == self.selected:
-                    bg, fg = theme.ACCENT, "#ffffff"
+                    bg, fg = theme.ACCENT, theme.ON_ACCENT
                 elif day == today:
                     bg = theme.SURFACE_3
                 cell = tk.Label(self.grid_frame, text=str(day.day), width=4, pady=4, background=bg,
@@ -285,7 +285,7 @@ class SortableTree(ttk.Frame):
         for status, color in theme.STATUS_COLORS.items():
             self.tree.tag_configure(status, foreground=color)
         self.tree.tag_configure("odd", background=theme.SURFACE)
-        self.tree.tag_configure("even", background="#1a2130")
+        self.tree.tag_configure("even", background=theme.ROW_ALT)
         self._update_headings()
 
     def sort_by(self, key: str):

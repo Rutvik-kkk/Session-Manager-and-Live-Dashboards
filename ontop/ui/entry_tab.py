@@ -115,17 +115,18 @@ class SessionEntryTab(ttk.Frame):
     def _build(self):
         scroller = ScrollableFrame(self)
         scroller.pack(fill="both", expand=True)
-        body = ttk.Frame(scroller.inner, padding=(24, 18, 24, 24))
+        body = ttk.Frame(scroller.inner, padding=(24, 10, 24, 12))
         body.pack(fill="both", expand=True)
         self.body = body
 
         head = ttk.Frame(body)
-        head.pack(fill="x", pady=(0, 14))
+        head.pack(fill="x", pady=(0, 4))
         self.title_label = ttk.Label(head, text="New session", style="Title.TLabel")
         self.title_label.pack(side="left")
         self.mode_label = ttk.Label(head, text="EDITING", style="Mode.TLabel")
+        self._build_actions(head)
         self.subtitle = ttk.Label(body, style="Subtitle.TLabel", justify="left")
-        self.subtitle.pack(fill="x", pady=(0, 12))
+        self.subtitle.pack(fill="x", pady=(0, 10))
 
         self.columns = ttk.Frame(body)
         self.columns.pack(fill="both", expand=True)
@@ -134,10 +135,8 @@ class SessionEntryTab(ttk.Frame):
 
         self._build_customer(self.left)
         self._build_timing(self.left)
-        self._build_notes(self.left)
         self._build_payment(self.right)
         self._build_extend(self.right)
-        self._build_actions(body)
 
         self._stacked: bool | None = None
         self.columns.bind("<Configure>", self._on_resize)
@@ -161,8 +160,8 @@ class SessionEntryTab(ttk.Frame):
             self.right.grid(row=0, column=1, sticky="nsew", padx=(10, 0))
 
     def _section(self, parent: tk.Misc, title: str, hint: str | None = None) -> ttk.Frame:
-        outer, inner = card(parent, padding=18)
-        outer.pack(fill="x", pady=(0, 16))
+        outer, inner = card(parent, padding=(18, 12))
+        outer.pack(fill="x", pady=(0, 12))
         ttk.Label(inner, text=title, style="CardSection.TLabel").grid(row=0, column=0, columnspan=4, sticky="w")
         if hint:
             ttk.Label(inner, text=hint, style="CardSmall.TLabel").grid(row=1, column=0, columnspan=4, sticky="w", pady=(2, 0))
@@ -171,16 +170,16 @@ class SessionEntryTab(ttk.Frame):
 
     def _field_label(self, parent, text: str, row: int, required: bool = False):
         label = text + (" *" if required else "")
-        ttk.Label(parent, text=label, style="CardMuted.TLabel").grid(row=row, column=0, sticky="w", padx=(0, 14), pady=6)
+        ttk.Label(parent, text=label, style="CardMuted.TLabel").grid(row=row, column=0, sticky="w", padx=(0, 14), pady=4)
 
     def _build_customer(self, parent):
         f = self._section(parent, "Customer & device")
         ttk.Checkbutton(f, text="Monthly pass holder (time comes off their pass)", variable=self.pass_var,
                         style="Card.TCheckbutton").grid(row=2, column=0, columnspan=4, sticky="w", pady=(8, 2))
         self.phone_label = ttk.Label(f, text="Pass phone no. *", style="CardMuted.TLabel")
-        self.phone_label.grid(row=3, column=0, sticky="w", padx=(0, 14), pady=6)
+        self.phone_label.grid(row=3, column=0, sticky="w", padx=(0, 14), pady=4)
         row = ttk.Frame(f, style="Inner.TFrame")
-        row.grid(row=3, column=1, columnspan=3, sticky="w", pady=6)
+        row.grid(row=3, column=1, columnspan=3, sticky="w", pady=4)
         self.phone_entry = ttk.Entry(row, textvariable=self.phone_var, width=16)
         self.phone_entry.pack(side="left")
         self.register_pass_btn = ttk.Button(row, text="Register new pass", style="Small.TButton",
@@ -191,23 +190,24 @@ class SessionEntryTab(ttk.Frame):
 
         self._field_label(f, "Customer name", 5, True)
         self.name_entry = ttk.Entry(f, textvariable=self.name_var)
-        self.name_entry.grid(row=5, column=1, columnspan=3, sticky="ew", pady=6)
+        self.name_entry.grid(row=5, column=1, columnspan=3, sticky="ew", pady=4)
         self._field_label(f, "Device", 6, True)
         self.device_combo = ttk.Combobox(f, textvariable=self.device_var, values=DEVICES, state="readonly", width=14)
-        self.device_combo.grid(row=6, column=1, sticky="w", pady=6)
+        self.device_combo.grid(row=6, column=1, sticky="w", pady=4)
         self._field_label(f, "No. of players", 7, True)
         self.players_combo = ttk.Combobox(f, textvariable=self.players_var, values=[str(n) for n in PLAYER_COUNTS],
                                           state="readonly", width=6)
-        self.players_combo.grid(row=7, column=1, sticky="w", pady=6)
+        self.players_combo.grid(row=7, column=1, sticky="w", pady=4)
         ttk.Label(f, text="2–4 players: minimum 1 hour", style="CardSmall.TLabel").grid(
             row=7, column=2, columnspan=2, sticky="w", padx=8)
+        self._build_notes(f, 8)
 
     def _build_timing(self, parent):
         f = self._section(parent, "Timing",
                           f"Open {opening_hours_text()} · 24-hour times (HH:MM) in this computer's local timezone.")
         self._field_label(f, "Session date", 2, True)
         row = ttk.Frame(f, style="Inner.TFrame")
-        row.grid(row=2, column=1, columnspan=3, sticky="w", pady=6)
+        row.grid(row=2, column=1, columnspan=3, sticky="w", pady=4)
         self.date_entry = DateEntry(row, textvariable=self.date_var, style="Inner.TFrame")
         self.date_entry.pack(side="left")
         ttk.Button(row, text="Today", style="Small.TButton",
@@ -215,18 +215,18 @@ class SessionEntryTab(ttk.Frame):
 
         self._field_label(f, "Start time", 3, True)
         row = ttk.Frame(f, style="Inner.TFrame")
-        row.grid(row=3, column=1, columnspan=3, sticky="w", pady=6)
+        row.grid(row=3, column=1, columnspan=3, sticky="w", pady=4)
         self.start_entry = ttk.Entry(row, textvariable=self.start_var, width=8)
         self.start_entry.pack(side="left")
         ttk.Button(row, text="Now", style="Small.TButton", command=self._start_now).pack(side="left", padx=(8, 0))
 
         self._field_label(f, "End time", 4, True)
         self.end_entry = ttk.Entry(f, textvariable=self.end_var, width=8)
-        self.end_entry.grid(row=4, column=1, sticky="w", pady=6)
+        self.end_entry.grid(row=4, column=1, sticky="w", pady=4)
 
         self._field_label(f, "Duration", 5, True)
         row = ttk.Frame(f, style="Inner.TFrame")
-        row.grid(row=5, column=1, columnspan=3, sticky="w", pady=6)
+        row.grid(row=5, column=1, columnspan=3, sticky="w", pady=4)
         max_hours = CLOSING_TIME.hour - OPENING_TIME.hour
         self.dur_h_spin = ttk.Spinbox(row, from_=0, to=max_hours, increment=1, width=4, textvariable=self.dur_h_var)
         self.dur_h_spin.pack(side="left")
@@ -240,18 +240,19 @@ class SessionEntryTab(ttk.Frame):
         self.timing_error = ttk.Label(f, style="CardError.TLabel", wraplength=520, justify="left")
         self.timing_error.grid(row=7, column=0, columnspan=4, sticky="w", pady=(4, 0))
 
-    def _build_notes(self, parent):
-        f = self._section(parent, "Note", "Optional — anything worth remembering about this session.")
+    def _build_notes(self, f: ttk.Frame, row: int):
+        self._field_label(f, "Note", row)
         self.notes_text = tk.Text(
-            f, height=3, wrap="word", undo=True, font=theme.FONTS["base"],
+            f, height=2, width=10, wrap="word", undo=True, font=theme.FONTS["base"],
             background=theme.SURFACE_2, foreground=theme.TEXT, insertbackground=theme.TEXT,
             selectbackground=theme.ACCENT_DIM, selectforeground=theme.TEXT, relief="flat",
             highlightthickness=1, highlightbackground=theme.BORDER, highlightcolor=theme.ACCENT,
-            padx=8, pady=6,
+            padx=8, pady=4,
         )
-        self.notes_text.grid(row=2, column=0, columnspan=4, sticky="ew", pady=(8, 0))
+        self.notes_text.grid(row=row, column=1, columnspan=3, sticky="ew", pady=4)
+        Tooltip(self.notes_text, "Optional — anything worth remembering about this session.")
         self.notes_count = ttk.Label(f, style="CardSmall.TLabel")
-        self.notes_count.grid(row=3, column=0, columnspan=4, sticky="e", pady=(4, 0))
+        self.notes_count.grid(row=row + 1, column=0, columnspan=4, sticky="e")
         self.notes_text.bind("<<Modified>>", self._on_notes_modified)
         self.notes_text.bind("<Tab>", self._focus_next)
         self.notes_text.bind("<Shift-Tab>", self._focus_prev)
@@ -287,11 +288,11 @@ class SessionEntryTab(ttk.Frame):
                           "The amount is filled in from the price list. You can change it; amounts are in INR (₹).")
         self._field_label(f, "Payment method", 2, True)
         self.method_combo = ttk.Combobox(f, textvariable=self.method_var, values=PAYMENT_METHODS, state="readonly", width=14)
-        self.method_combo.grid(row=2, column=1, sticky="w", pady=6)
+        self.method_combo.grid(row=2, column=1, sticky="w", pady=4)
 
         self._field_label(f, "Payment amount (₹)", 3, True)
         self.total_entry = ttk.Entry(f, textvariable=self.total_var, width=16)
-        self.total_entry.grid(row=3, column=1, sticky="w", pady=6)
+        self.total_entry.grid(row=3, column=1, sticky="w", pady=4)
         self.use_price_btn = ttk.Button(f, text="Use price list", style="Small.TButton", command=self.use_price_list)
         self.use_price_btn.grid(row=3, column=2, sticky="w", padx=8)
         Tooltip(self.use_price_btn, "Replace the amount with the price-list charge and keep it updated automatically.")
@@ -300,17 +301,17 @@ class SessionEntryTab(ttk.Frame):
 
         self._field_label(f, "Amount paid (₹)", 5, True)
         self.paid_entry = ttk.Entry(f, textvariable=self.paid_var, width=16)
-        self.paid_entry.grid(row=5, column=1, sticky="w", pady=6)
+        self.paid_entry.grid(row=5, column=1, sticky="w", pady=4)
         ttk.Button(f, text="Paid in full", style="Small.TButton",
                    command=lambda: self.paid_var.set(self.total_var.get())).grid(row=5, column=2, sticky="w", padx=8)
 
         self._field_label(f, "Payment status", 6, True)
         self.status_combo = ttk.Combobox(f, textvariable=self.status_var, values=PAYMENT_STATUSES, state="readonly", width=16)
-        self.status_combo.grid(row=6, column=1, sticky="w", pady=6)
+        self.status_combo.grid(row=6, column=1, sticky="w", pady=4)
 
         self._field_label(f, "Balance due", 7)
         self.balance_entry = ttk.Entry(f, textvariable=self.balance_var, width=16, state="readonly", style="Balance.TEntry")
-        self.balance_entry.grid(row=7, column=1, sticky="w", pady=6)
+        self.balance_entry.grid(row=7, column=1, sticky="w", pady=4)
 
         self.payment_msg = ttk.Label(f, style="CardMuted.TLabel", wraplength=480, justify="left")
         self.payment_msg.grid(row=8, column=0, columnspan=4, sticky="w", pady=(8, 0))
@@ -338,7 +339,7 @@ class SessionEntryTab(ttk.Frame):
 
         ttk.Label(f, text="Extension history", style="CardMuted.TLabel").grid(row=4, column=0, columnspan=4, sticky="w")
         cols = ("when", "added", "prev", "new")
-        self.history = ttk.Treeview(f, columns=cols, show="headings", height=4, selectmode="none")
+        self.history = ttk.Treeview(f, columns=cols, show="headings", height=3, selectmode="none")
         for key, text, width in (("when", "Extended at", 150), ("added", "Added", 70),
                                  ("prev", "Previous end", 140), ("new", "New end", 140)):
             self.history.heading(key, text=text)
@@ -348,14 +349,14 @@ class SessionEntryTab(ttk.Frame):
 
     def _build_actions(self, parent):
         bar = ttk.Frame(parent)
-        bar.pack(fill="x", pady=(4, 0))
+        bar.pack(side="right")
         self.save_btn = ttk.Button(bar, text="Save Session", style="Accent.TButton", command=self.save)
         self.clear_btn = ttk.Button(bar, text="Clear Form", command=self._confirm_clear)
         self.update_btn = ttk.Button(bar, text="Update Session", style="Accent.TButton", command=self.update)
         self.cancel_btn = ttk.Button(bar, text="Cancel Edit", style="Danger.TButton", command=self.cancel_edit)
         self.action_bar = bar
         self.readonly_label = ttk.Label(bar, style="Error.TLabel")
-        self.readonly_label.pack(side="right")
+        self.readonly_label.pack(side="left", padx=(0, 12))
         Tooltip(self.save_btn, "Validate and save this session (Ctrl+S)")
         Tooltip(self.update_btn, "Validate and save the changes to this existing session (Ctrl+S)")
         Tooltip(self.cancel_btn, "Discard every unsaved change, including pending extensions")

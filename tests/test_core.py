@@ -415,7 +415,9 @@ class AnalyticsTests(unittest.TestCase):
     def test_presets(self):
         today = date(2026, 10, 27)
         self.assertEqual(an.preset_range(an.PRESET_LAST_7, today), (date(2026, 10, 21), today))
+        self.assertEqual(an.preset_range(an.PRESET_THIS_WEEK, today), (date(2026, 10, 26), today))
         self.assertEqual(an.preset_range(an.PRESET_THIS_MONTH, today), (date(2026, 10, 1), today))
+        self.assertEqual(an.preset_range(an.PRESET_THIS_YEAR, today), (date(2026, 1, 1), today))
         self.assertEqual(an.preset_range(an.PRESET_ALL, today), (None, None))
 
     def test_filter_inclusive_by_start_date(self):
@@ -442,8 +444,20 @@ class AnalyticsTests(unittest.TestCase):
         self.assertEqual([(b.start, b.paid_paise) for b in months],
                          [(date(2026, 9, 1), 0), (date(2026, 10, 1), 20000)])
 
+    def test_earnings_include_pass_sales(self):
+        p = make_pass(bought=date(2026, 10, 26))
+        days = an.earnings_series(self.rows, [p], an.GROUP_DAY, date(2026, 10, 25), date(2026, 10, 27))
+        self.assertEqual([(b.start.day, b.sessions_paise, b.passes_paise, b.total_paise) for b in days],
+                         [(25, 0, 0, 0), (26, 5000, 192000, 197000), (27, 0, 0, 0)])
+        months = an.earnings_series(self.rows, [p], an.GROUP_MONTH)
+        self.assertEqual([b.total_paise for b in months], [0, 20000 + 192000])
+
+    def test_busy_hours_count_every_hour_played(self):
+        counts = an.busy_hour_counts(self.rows)
+        self.assertEqual({h: c for h, c in enumerate(counts) if c},
+                         {10: 1, 11: 1, 18: 2, 19: 1, 20: 1, 21: 1})
+
     def test_breakdowns(self):
-        self.assertEqual(an.status_counts(self.rows), {"Paid": 2, "Unpaid": 1, "Partially Paid": 1})
         self.assertEqual(an.received_by_method(self.rows), {"Cash": 5000, "UPI": 15000, "Card": 0, "Other": 0})
         stats = an.sort_device_stats(an.device_stats(self.rows), an.METRIC_HOURS, True)
         self.assertEqual([s.device for s in stats], ["PS5(X)", "PS4", "PS5(Y)"])
@@ -507,6 +521,50 @@ class RecordTests(unittest.TestCase):
         bad["valid_until"] = "2030-01-01"
         with self.assertRaises(ValueError):
             MonthlyPass.from_dict(bad)
+
+
+class SettingsTests(TempStoreCase):
+    def test_round_trip_and_apply(self):
+        from ontop import config
+        from ontop import settings as st
+
+        saved = {k: getattr(config, k) for k in ("OPENING_TIME", "CLOSING_TIME", "HOURLY_RATES_PAISE",
+                                                 "HALF_HOUR_PRICES_PAISE", "PASS_DEFAULT_PRICE_PAISE",
+                                                 "PASS_HOURS", "PASS_VALID_DAYS")}
+        self.addCleanup(lambda: [setattr(config, k, v) for k, v in saved.items()])
+        path = st.settings_path(self.dir)
+        self.assertEqual(st.load(path), (st.AppSettings(), None))
+        s = st.AppSettings(theme="Ocean", opening="10:00", closing="23:00", pass_price_paise=250000, pass_hours=20)
+        s.hourly_rates_paise["PS4"][2] = 13000
+        st.save(path, s)
+        loaded, warning = st.load(path)
+        self.assertIsNone(warning)
+        self.assertEqual(loaded, s)
+        st.apply(loaded)
+        self.assertEqual((config.OPENING_TIME, config.CLOSING_TIME), (time(10), time(23)))
+        self.assertEqual((config.HOURLY_RATES_PAISE["PS4"][2], config.PASS_HOURS), (13000, 20))
+
+    def test_invalid_settings_fall_back_to_defaults(self):
+        from ontop import settings as st
+
+        path = st.settings_path(self.dir)
+        with self.assertRaises(ValueError):
+            st.save(path, st.AppSettings(opening="22:00", closing="09:00"))
+        self.assertFalse(path.exists())
+        self.dir.mkdir(parents=True, exist_ok=True)
+        path.write_text("{not json", encoding="utf-8")
+        settings, warning = st.load(path)
+        self.assertEqual(settings, st.AppSettings())
+        self.assertIn("default settings", warning)
+        path.write_text(json.dumps({"pass_hours": 0}), encoding="utf-8")
+        self.assertIn("between 1 and 744", st.load(path)[1])
+
+    def test_every_theme_defines_every_colour(self):
+        from ontop.ui import theme
+
+        keys = set(theme.PALETTES["Midnight"])
+        for name, palette in theme.PALETTES.items():
+            self.assertEqual(set(palette), keys, name)
 
 
 if __name__ == "__main__":

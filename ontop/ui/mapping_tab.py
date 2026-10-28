@@ -69,7 +69,7 @@ class SessionDetailsDialog(tk.Toplevel):
         head.pack(fill="x")
         ttk.Label(head, text=session.customer_name, style="CardSection.TLabel").pack(side="left")
         tk.Label(head, text=f"  {session.payment_status}  ", background=theme.STATUS_COLORS[session.payment_status],
-                 foreground="#0b0f17", font=theme.FONTS["small_bold"]).pack(side="left", padx=12)
+                 foreground=theme.BAR_TEXT, font=theme.FONTS["small_bold"]).pack(side="left", padx=12)
 
         grid = ttk.Frame(body, style="Inner.TFrame")
         grid.pack(fill="x", pady=(14, 0))
@@ -173,7 +173,7 @@ class SessionMappingTab(ttk.Frame):
 
         frame = ttk.Frame(self, style="Card.TFrame")
         frame.pack(fill="both", expand=True)
-        self.labels = tk.Canvas(frame, width=LABEL_W, background=theme.SURFACE, highlightthickness=0)
+        self.labels = tk.Canvas(frame, width=theme.px(LABEL_W), background=theme.SURFACE, highlightthickness=0)
         self.labels.grid(row=0, column=0, sticky="ns", padx=(1, 0), pady=(1, 0))
         self.canvas = tk.Canvas(frame, background=theme.SURFACE, highlightthickness=0)
         self.canvas.grid(row=0, column=1, sticky="nsew", padx=(0, 1), pady=(1, 0))
@@ -251,57 +251,59 @@ class SessionMappingTab(ttk.Frame):
         hours = last_hour - first_hour
         view_w = max(c.winfo_width(), 200)
         view_h = max(c.winfo_height(), 200)
-        width = max(view_w, MARGIN * 2 + hours * MIN_HOUR_W)
+        header_h, label_w, margin = theme.px(HEADER_H), theme.px(LABEL_W), theme.px(MARGIN)
+        width = max(view_w, margin * 2 + hours * theme.px(MIN_HOUR_W))
         devices = self.visible_devices()
-        lane_h = max(MIN_LANE_H, min(MAX_LANE_H, (view_h - HEADER_H - 12) // len(devices)))
-        height = HEADER_H + lane_h * len(devices) + 12
-        span_w = width - 2 * MARGIN
+        lane_h = max(theme.px(MIN_LANE_H), min(theme.px(MAX_LANE_H), (view_h - header_h - 12) // len(devices)))
+        height = header_h + lane_h * len(devices) + 12
+        span_w = width - 2 * margin
         day_start = hour_moment(self.selected_date, first_hour)
         day_end = hour_moment(self.selected_date, last_hour)
         day_seconds = (day_end - day_start).total_seconds()
 
         def x_at(dt) -> float:
-            return MARGIN + (dt - day_start).total_seconds() / day_seconds * span_w
+            return margin + (dt - day_start).total_seconds() / day_seconds * span_w
 
         small, bold = theme.FONTS["small"], theme.FONTS["small_bold"]
 
-        lc.create_text(14, HEADER_H / 2, text="Device", anchor="w", fill=theme.MUTED, font=small)
+        lc.create_text(14, header_h / 2, text="Device", anchor="w", fill=theme.MUTED, font=small)
         for i, dev in enumerate(devices):
-            top = HEADER_H + i * lane_h
-            fill = theme.SURFACE if i % 2 == 0 else "#1a2130"
+            top = header_h + i * lane_h
+            fill = theme.SURFACE if i % 2 == 0 else theme.ROW_ALT
             c.create_rectangle(0, top, width, top + lane_h, fill=fill, outline="")
-            lc.create_rectangle(0, top, LABEL_W, top + lane_h, fill=fill, outline="")
+            lc.create_rectangle(0, top, label_w, top + lane_h, fill=fill, outline="")
             lc.create_rectangle(0, top + 10, 4, top + lane_h - 10, fill=theme.DEVICE_COLORS.get(dev, theme.ACCENT), outline="")
             count = sum(1 for s in sessions if s.device == dev)
-            lc.create_text(16, top + lane_h / 2 - 9, text=dev, anchor="w", fill=theme.TEXT, font=theme.FONTS["section"])
-            lc.create_text(16, top + lane_h / 2 + 12, text=f"{count} session{'s' if count != 1 else ''}",
+            lc.create_text(16, top + lane_h / 2 - theme.px(10), text=dev, anchor="w", fill=theme.TEXT,
+                           font=theme.FONTS["section"])
+            lc.create_text(16, top + lane_h / 2 + theme.px(12), text=f"{count} session{'s' if count != 1 else ''}",
                            anchor="w", fill=theme.MUTED, font=small)
-        lc.create_line(LABEL_W - 1, 0, LABEL_W - 1, height, fill=theme.BORDER)
+        lc.create_line(label_w - 1, 0, label_w - 1, height, fill=theme.BORDER)
 
         label_every = 1 if span_w / hours >= 46 else 2
         for hour in range(first_hour, last_hour + 1):
             moment = hour_moment(self.selected_date, hour)
             x = x_at(moment)
-            c.create_line(x, HEADER_H - 6, x, height - 12, fill=theme.BORDER)
+            c.create_line(x, header_h - 6, x, height - 12, fill=theme.BORDER)
             if hour < last_hour:
                 half = x_at(moment + timedelta(minutes=30))
-                c.create_line(half, HEADER_H, half, height - 12, fill="#1f2838", dash=(2, 4))
+                c.create_line(half, header_h, half, height - 12, fill=theme.GRID_MINOR, dash=(2, 4))
             if (hour - first_hour) % label_every == 0:
                 anchor = "w" if hour == first_hour else ("e" if hour == last_hour else "center")
-                c.create_text(x, HEADER_H / 2, text=f"{hour:02d}:00", fill=theme.MUTED, font=small, anchor=anchor)
-        c.create_line(0, HEADER_H, width, HEADER_H, fill=theme.BORDER)
+                c.create_text(x, header_h / 2, text=f"{hour:02d}:00", fill=theme.MUTED, font=small, anchor=anchor)
+        c.create_line(0, header_h, width, header_h, fill=theme.BORDER)
 
         for s in sessions:
             span = bar_span(s.start, s.end, day_start, day_end)
             if span is None:
                 continue
             lane = devices.index(s.device)
-            x0 = MARGIN + span[0] * span_w
-            x1 = MARGIN + span[1] * span_w
+            x0 = margin + span[0] * span_w
+            x1 = margin + span[1] * span_w
             if x1 - x0 < 3:
                 x1 = x0 + 3
-            y0 = HEADER_H + lane * lane_h + 9
-            y1 = HEADER_H + (lane + 1) * lane_h - 9
+            y0 = header_h + lane * lane_h + 9
+            y1 = header_h + (lane + 1) * lane_h - 9
             color = theme.STATUS_COLORS.get(s.payment_status, theme.ACCENT)
             tags = ("bar", f"s:{s.id}")
             c.create_rectangle(x0, y0, x1, y1, fill=color, outline=theme.SURFACE, width=1, tags=tags)
@@ -317,7 +319,7 @@ class SessionMappingTab(ttk.Frame):
             players = f" · {s.players}P" if s.players > 1 else ""
             name = fit_text(bold, badges + s.customer_name + players + suffix, room)
             times = fit_text(small, f"{start_txt}–{end_txt}", room)
-            text_color = "#0b0f17"
+            text_color = theme.BAR_TEXT
             line_h = bold.metrics("linespace")
             mid = (y0 + y1) / 2
             if name and len(name) > 2 and times and (y1 - y0) >= 2 * line_h + 6:
@@ -329,22 +331,22 @@ class SessionMappingTab(ttk.Frame):
         now = now_local()
         if self.selected_date == now.date() and day_start <= now <= day_end:
             x = x_at(now)
-            c.create_line(x, HEADER_H - 4, x, height - 12, fill="#f8fafc", width=2)
-            c.create_rectangle(x - 26, 3, x + 26, HEADER_H - 15, fill="#f8fafc", outline="")
-            c.create_text(x, (HEADER_H - 12) / 2 + 1, text=now.strftime("%H:%M"), fill="#0b0f17", font=bold)
+            c.create_line(x, header_h - 4, x, height - 12, fill=theme.NOW_LINE, width=2)
+            c.create_rectangle(x - theme.px(26), 3, x + theme.px(26), header_h - 15, fill=theme.NOW_LINE, outline="")
+            c.create_text(x, (header_h - 12) / 2 + 1, text=now.strftime("%H:%M"), fill=theme.SURFACE, font=bold)
 
         if not sessions:
             scope = "any device" if len(devices) > 1 else devices[0]
             c.create_text(
                 view_w / 2 + c.canvasx(0),
-                HEADER_H + (lane_h * len(devices)) / 2,
+                header_h + (lane_h * len(devices)) / 2,
                 text=f"No sessions on {scope} for {fmt_date_long(self.selected_date)}",
                 fill=theme.MUTED,
                 font=theme.FONTS["section"],
             )
 
         c.configure(scrollregion=(0, 0, width, height))
-        lc.configure(scrollregion=(0, 0, LABEL_W, height))
+        lc.configure(scrollregion=(0, 0, label_w, height))
         n = len(sessions)
         self.info_label.configure(
             text=f"{fmt_date_long(self.selected_date)}  ·  {n} session{'s' if n != 1 else ''}"

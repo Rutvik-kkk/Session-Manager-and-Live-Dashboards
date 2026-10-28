@@ -87,6 +87,30 @@ class GuiWorkflowTests(unittest.TestCase):
         self.assertIs(self.app.current_tab(), self.app.passes)
         self.assertEqual(self.app.passes.phone_var.get(), "98765 43210")
 
+    def test_header_nav_and_menu(self):
+        app = self.app
+        self.assertEqual([b.cget("text") for b in app.nav_buttons.values()],
+                         ["Dashboard", "Session Entry", "Previous Entries", "Session Mapping"])
+        app.nav_buttons[str(app.mapping)].invoke()
+        self.pump()
+        self.assertIs(app.current_tab(), app.mapping)
+        self.assertEqual(app.nav_buttons[str(app.mapping)].cget("style"), "NavActive.TButton")
+        labels = [app.menu.entrycget(i, "label") for i in range(app.menu.index("end") + 1)
+                  if app.menu.type(i) != "separator"]
+        self.assertEqual(labels, ["General settings…", "Theme", "Exit"])
+
+        self.e.name_var.set("Asha")
+        self.ask.return_value = False
+        app.request_exit()
+        self.assertIn("hasn't been saved", self.ask.call_args.args[1])
+        self.assertTrue(self.root.winfo_exists())
+
+        app.choose_theme("Ocean")
+        saved = json.loads((self.path.parent / "settings.json").read_text(encoding="utf-8"))
+        self.assertEqual(saved["theme"], "Ocean")
+        self.assertFalse(app.restart_requested)
+        self.assertIn("restart", app.status.cget("text"))
+
     def test_duration_sync_and_closing_time(self):
         e = self.e
         self.fill(start="10:00", end="12:30")
@@ -290,7 +314,7 @@ class GuiWorkflowTests(unittest.TestCase):
         e.save()
         d = self.app.dashboard
         self.pump()
-        self.assertEqual(d.chart_count(), 6)
+        self.assertEqual(d.chart_count(), 5)
         self.assertEqual(d.cards["charges"][1].cget("text"), "₹300.00")
         self.assertEqual(d.cards["received"][1].cget("text"), "₹150.00")
         d.device_var.set("PS4")

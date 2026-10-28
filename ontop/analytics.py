@@ -16,7 +16,6 @@ from .formatting import local_datetime
 from .models import (
     DEVICES,
     PAYMENT_METHODS,
-    PAYMENT_STATUSES,
     MonthlyPass,
     Session,
     customer_key,
@@ -26,10 +25,14 @@ from .models import (
 PRESET_TODAY = "Today"
 PRESET_YESTERDAY = "Yesterday"
 PRESET_LAST_7 = "Last 7 Days"
+PRESET_THIS_WEEK = "This Week"
 PRESET_THIS_MONTH = "This Month"
+PRESET_THIS_YEAR = "This Year"
 PRESET_ALL = "All Time"
 PRESET_CUSTOM = "Custom Range"
-DATE_PRESETS = (PRESET_TODAY, PRESET_YESTERDAY, PRESET_LAST_7, PRESET_THIS_MONTH, PRESET_ALL, PRESET_CUSTOM)
+DATE_PRESETS = (PRESET_TODAY, PRESET_YESTERDAY, PRESET_LAST_7, PRESET_THIS_WEEK, PRESET_THIS_MONTH,
+                PRESET_THIS_YEAR, PRESET_ALL, PRESET_CUSTOM)
+BUSY_PERIODS = (PRESET_THIS_WEEK, PRESET_THIS_MONTH, PRESET_THIS_YEAR)
 
 GROUP_DAY = "Day"
 GROUP_WEEK = "Week"
@@ -57,8 +60,12 @@ def preset_range(preset: str, today: date) -> tuple[date | None, date | None]:
         return y, y
     if preset == PRESET_LAST_7:
         return today - timedelta(days=6), today
+    if preset == PRESET_THIS_WEEK:
+        return today - timedelta(days=today.weekday()), today
     if preset == PRESET_THIS_MONTH:
         return today.replace(day=1), today
+    if preset == PRESET_THIS_YEAR:
+        return today.replace(month=1, day=1), today
     if preset == PRESET_ALL:
         return None, None
     raise ValueError(f"'{preset}' has no fixed range")
@@ -205,6 +212,45 @@ def time_series(
     return buckets
 
 
+@dataclass(frozen=True)
+class EarningsBucket:
+    start: date
+    sessions_paise: int
+    passes_paise: int
+
+    @property
+    def total_paise(self) -> int:
+        return self.sessions_paise + self.passes_paise
+
+
+def earnings_series(
+    sessions: Sequence[Session],
+    passes: Sequence[MonthlyPass],
+    group: str,
+    range_start: date | None = None,
+    range_end: date | None = None,
+) -> list[EarningsBucket]:
+    """Money received per period: session payments (by session date) plus pass sales (by purchase date)."""
+    dates = [s.start_date for s in sessions] + [p.purchased_on for p in passes]
+    lo = range_start if range_start is not None else (min(dates) if dates else None)
+    hi = range_end if range_end is not None else (max(dates) if dates else None)
+    if lo is None or hi is None or lo > hi:
+        return []
+    from_sessions: Counter = Counter()
+    from_passes: Counter = Counter()
+    for s in sessions:
+        from_sessions[bucket_start(s.start_date, group)] += s.paid_paise
+    for p in passes:
+        from_passes[bucket_start(p.purchased_on, group)] += p.price_paise
+    buckets = []
+    cur = bucket_start(lo, group)
+    last = bucket_start(hi, group)
+    while cur <= last:
+        buckets.append(EarningsBucket(cur, from_sessions[cur], from_passes[cur]))
+        cur = next_bucket(cur, group)
+    return buckets
+
+
 # --------------------------------------------------------------------------
 # Breakdowns
 # --------------------------------------------------------------------------
@@ -244,11 +290,6 @@ def sort_device_stats(stats: Sequence[DeviceStats], sort_by: str, descending: bo
     return sorted(by_name, key=lambda st: st.metric(sort_by), reverse=descending)
 
 
-def status_counts(sessions: Sequence[Session]) -> dict[str, int]:
-    counts = Counter(s.payment_status for s in sessions)
-    return {status: counts.get(status, 0) for status in PAYMENT_STATUSES}
-
-
 def received_by_method(sessions: Sequence[Session]) -> dict[str, int]:
     """Amount received, attributed to each session's single saved method."""
     out = {m: 0 for m in PAYMENT_METHODS}
@@ -257,10 +298,18 @@ def received_by_method(sessions: Sequence[Session]) -> dict[str, int]:
     return out
 
 
-def start_hour_counts(sessions: Sequence[Session]) -> list[int]:
+def busy_hour_counts(sessions: Sequence[Session]) -> list[int]:
+    """For each hour of the day (local time), how many sessions were playing during it.
+
+    A session from 10:30 to 12:00 counts towards 10:00 and 11:00.
+    """
     counts = [0] * 24
     for s in sessions:
-        counts[s.local_start.hour] += 1
+        cur = s.local_start.replace(minute=0, second=0, microsecond=0)
+        end = s.local_end
+        while cur < end:
+            counts[cur.hour] += 1
+            cur = (cur + timedelta(hours=1)).astimezone()
     return counts
 
 
