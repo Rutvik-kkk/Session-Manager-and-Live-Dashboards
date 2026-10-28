@@ -61,10 +61,10 @@ class OnTopApp:
         self.entry_tabs.add(self.passes, text="Monthly Passes")
         self.entries = PreviousEntriesTab(self.notebook, self)
         self.mapping = SessionMappingTab(self.notebook, self)
-        self.notebook.add(self.dashboard, text="Dashboard")
         self.notebook.add(self.entry_area, text="Session Entry")
-        self.notebook.add(self.entries, text="Previous Entries")
         self.notebook.add(self.mapping, text="Session Mapping")
+        self.notebook.add(self.entries, text="Previous Entries")
+        self.notebook.add(self.dashboard, text="Dashboard")
         self._build_nav()
 
         self.status = ttk.Label(root, style="Muted.TLabel", padding=(24, 6))

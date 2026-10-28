@@ -94,12 +94,12 @@ or **Update Session** succeeds. Ctrl+S saves.
 (Active, Used up, Expired). Select a pass to see each session it was used for. **Start Session** opens
 a new session for that holder.
 
+**Session Mapping**: a daily 09:00–22:00 timeline with one lane per device, coloured by payment status.
+★ marks pass sessions and 2P–4P shows the player count. Click a bar for details and **Edit Session**.
+
 **Previous Entries**: search by customer, filter by start date, device and payment status, and click
 headings to sort. Double-click a row (or use **Edit Selected**) to edit it. The totals below the table
 cover the filtered rows.
-
-**Session Mapping**: a daily 09:00–22:00 timeline with one lane per device, coloured by payment status.
-★ marks pass sessions and 2P–4P shows the player count. Click a bar for details and **Edit Session**.
 
 **Dashboard**: choose a date range (including This Week and This Year), device, method, status, customer and
 grouping, then **Apply Filters**. The cards, charts and breakdown table use the same filtered sessions.

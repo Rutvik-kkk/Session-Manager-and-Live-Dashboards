@@ -78,7 +78,7 @@ class GuiWorkflowTests(unittest.TestCase):
 
     def test_entry_and_passes_are_sub_tabs_of_session_entry(self):
         tabs = [self.app.notebook.tab(t, "text") for t in self.app.notebook.tabs()]
-        self.assertEqual(tabs, ["Dashboard", "Session Entry", "Previous Entries", "Session Mapping"])
+        self.assertEqual(tabs, ["Session Entry", "Session Mapping", "Previous Entries", "Dashboard"])
         subtabs = [self.app.entry_tabs.tab(t, "text") for t in self.app.entry_tabs.tabs()]
         self.assertEqual(subtabs, ["New Session", "Monthly Passes"])
         self.e.pass_var.set(True)
@@ -90,7 +90,7 @@ class GuiWorkflowTests(unittest.TestCase):
     def test_header_nav_and_menu(self):
         app = self.app
         self.assertEqual([b.cget("text") for b in app.nav_buttons.values()],
-                         ["Dashboard", "Session Entry", "Previous Entries", "Session Mapping"])
+                         ["Session Entry", "Session Mapping", "Previous Entries", "Dashboard"])
         app.nav_buttons[str(app.mapping)].invoke()
         self.pump()
         self.assertIs(app.current_tab(), app.mapping)
