@@ -128,6 +128,19 @@ class GuiWorkflowTests(unittest.TestCase):
         e.start_var.set("08:00")
         self.assertIn("opens at 09:00", e.timing_error.cget("text"))
 
+    def test_duration_buttons_step_by_hour_and_half_hour(self):
+        e = self.e
+        self.fill(start="10:00", end="11:45")
+        e._step_duration(30)
+        self.assertEqual((e.dur_h_var.get(), e.dur_m_var.get(), e.end_var.get()), ("2", "15", "12:15"))
+        e._step_duration(60)
+        self.assertEqual(e.end_var.get(), "13:15")
+        for _ in range(6):
+            e._step_duration(-30)
+        self.assertEqual((e.dur_h_var.get(), e.dur_m_var.get()), ("0", "15"))
+        e._step_duration(-30)
+        self.assertEqual((e.dur_h_var.get(), e.dur_m_var.get()), ("0", "0"))
+
     def test_amount_auto_fills_from_price_list_and_can_be_overridden(self):
         e = self.e
         self.fill(device="PS5(Y)", players=1, start="10:00", end="11:00")

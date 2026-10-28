@@ -227,13 +227,14 @@ class SessionEntryTab(ttk.Frame):
         self._field_label(f, "Duration", 5, True)
         row = ttk.Frame(f, style="Inner.TFrame")
         row.grid(row=5, column=1, columnspan=3, sticky="w", pady=4)
-        max_hours = CLOSING_TIME.hour - OPENING_TIME.hour
-        self.dur_h_spin = ttk.Spinbox(row, from_=0, to=max_hours, increment=1, width=4, textvariable=self.dur_h_var)
-        self.dur_h_spin.pack(side="left")
-        ttk.Label(row, text="hours", style="CardMuted.TLabel").pack(side="left", padx=(6, 14))
-        self.dur_m_spin = ttk.Spinbox(row, from_=0, to=59, increment=5, width=4, textvariable=self.dur_m_var)
-        self.dur_m_spin.pack(side="left")
-        ttk.Label(row, text="minutes", style="CardMuted.TLabel").pack(side="left", padx=(6, 0))
+        for var, unit, step in ((self.dur_h_var, "hours", 60), (self.dur_m_var, "minutes", 30)):
+            ttk.Button(row, text="−", width=3, takefocus=False,
+                       command=lambda s=-step: self._step_duration(s)).pack(side="left")
+            ttk.Entry(row, textvariable=var, width=4, justify="center").pack(side="left", padx=4)
+            ttk.Button(row, text="+", width=3, takefocus=False,
+                       command=lambda s=step: self._step_duration(s)).pack(side="left")
+            ttk.Label(row, text=unit, style="CardMuted.TLabel").pack(side="left", padx=(6, 18))
+        Tooltip(row, "− / + change the duration by 1 hour (hours) or 30 minutes (minutes). You can also type.")
 
         self.span_label = ttk.Label(f, style="CardInfo.TLabel", wraplength=520, justify="left")
         self.span_label.grid(row=6, column=0, columnspan=4, sticky="w", pady=(10, 0))
@@ -550,6 +551,21 @@ class SessionEntryTab(ttk.Frame):
     def _on_duration_changed(self):
         if not self._syncing:
             self._recalc_from_duration()
+
+    def _step_duration(self, delta: int):
+        try:
+            minutes = self._parse_duration()
+        except ValueError:
+            minutes = 0
+        longest = (CLOSING_TIME.hour - OPENING_TIME.hour) * 60
+        minutes = max(0, min(minutes + delta, longest))
+        self._syncing = True
+        try:
+            self.dur_h_var.set(str(minutes // 60))
+            self.dur_m_var.set(str(minutes % 60))
+        finally:
+            self._syncing = False
+        self._recalc_from_duration()
 
     def _set_timing_error(self, text: str):
         self.timing_error.configure(text=text)
