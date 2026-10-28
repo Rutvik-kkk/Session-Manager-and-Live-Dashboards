@@ -296,17 +296,37 @@ def apply_theme(root: tk.Tk) -> None:
         _apply_rounded_shapes(root, style)
 
 
-def _rounded_image(root: tk.Misc, fill: str, radius: int, outline: str | None = None):
-    """An anti-aliased rounded rectangle with transparent corners, for 9-slice image elements."""
+def _rounded_image(root: tk.Misc, fill: str, radius: int, outline: str | None, size: tuple[int, int],
+                   backdrop: str | None = None):
+    """An anti-aliased rounded rectangle with transparent corners, for 9-slice image elements.
+
+    ttk tiles the middle of an image element rather than stretching it, so the image is made
+    as large as the widgets it covers; a small one is redrawn as hundreds of tiles and crawls.
+    """
     from PIL import Image, ImageDraw, ImageTk
 
-    size, scale = radius * 2 + 12, 4
-    img = Image.new("RGBA", (size * scale, size * scale), (0, 0, 0, 0))
+    corner, scale = radius + 2, 4
+    small = corner * 2 + 1
+    img = Image.new("RGBA", (small * scale, small * scale), (0, 0, 0, 0))
     ImageDraw.Draw(img).rounded_rectangle(
-        (0, 0, size * scale - 1, size * scale - 1), radius=radius * scale, fill=fill,
+        (0, 0, small * scale - 1, small * scale - 1), radius=radius * scale, fill=fill,
         outline=outline, width=max(1, round(SCALE * 1.5)) * scale if outline else 0,
     )
-    return ImageTk.PhotoImage(img.resize((size, size), Image.LANCZOS), master=root)
+    img = img.resize((small, small), Image.LANCZOS)
+    if backdrop:  # opaque images draw far faster than alpha-blended ones
+        img = Image.alpha_composite(Image.new("RGBA", img.size, backdrop), img).convert("RGB")
+
+    w, h = max(size[0], small), max(size[1], small)
+    big = Image.new(img.mode, (w, h), img.getpixel((corner, corner)))
+    c, far_x, far_y = corner, w - corner, h - corner
+    for (sx, sy), (dx, dy) in (((0, 0), (0, 0)), ((c + 1, 0), (far_x, 0)),
+                               ((0, c + 1), (0, far_y)), ((c + 1, c + 1), (far_x, far_y))):
+        big.paste(img.crop((sx, sy, sx + c, sy + c)), (dx, dy))
+    big.paste(img.crop((c, 0, c + 1, c)).resize((far_x - c, c)), (c, 0))
+    big.paste(img.crop((c, c + 1, c + 1, small)).resize((far_x - c, c)), (c, far_y))
+    big.paste(img.crop((0, c, c, c + 1)).resize((c, far_y - c)), (0, c))
+    big.paste(img.crop((c + 1, c, small, c + 1)).resize((c, far_y - c)), (far_x, c))
+    return ImageTk.PhotoImage(big, master=root)
 
 
 def _arrow_image(root: tk.Misc, color: str, up: bool = False):
@@ -352,23 +372,26 @@ def _apply_rounded_shapes(root: tk.Misc, style: ttk.Style) -> None:
     images: list = []
     root._rounded_images = images  # PhotoImages vanish once unreferenced
 
-    def element(name: str, radius: int, normal: tuple, states=(), padding=0) -> None:
+    def element(name: str, radius: int, normal: tuple, states=(), padding=0, size=(px(400), px(80)),
+                backdrop: str | None = None) -> None:
         def image(colors: tuple):
-            img = _rounded_image(root, colors[0], radius, colors[1] if len(colors) > 1 else None)
+            img = _rounded_image(root, colors[0], radius, colors[1] if len(colors) > 1 else None, size, backdrop)
             images.append(img)
             return img
 
         base = image(normal)
         specs = [(state, image(colors)) for state, colors in states]
         try:
-            style.element_create(name, "image", base, *specs, border=radius + 2, padding=padding, sticky="nsew")
+            style.element_create(name, "image", base, *specs, border=radius + 2, padding=padding, sticky="nsew",
+                                 width=radius * 2 + 5, height=radius * 2 + 5)
         except tk.TclError:
             pass  # already created for this interpreter
 
     card_r, button_r, field_r = px(14), px(8), px(7)
     global CARD_INSET
     CARD_INSET = round(card_r * 0.32) + 1
-    element("Rounded.card", card_r, (SURFACE,))
+    element("Rounded.card", card_r, (SURFACE,), size=(root.winfo_screenwidth(), root.winfo_screenheight()),
+            backdrop=BG)
     style.layout("Card.TFrame", [("Rounded.card", {"sticky": "nsew"})])
     style.configure("Card.TFrame", background=BG)
 
@@ -397,10 +420,11 @@ def _apply_rounded_shapes(root: tk.Misc, style: ttk.Style) -> None:
     field_states = [
         ("disabled", (SURFACE, BORDER)), ("readonly !focus", (SURFACE, BORDER)), ("focus", (SURFACE_2, ACCENT)),
     ]
-    element("Rounded.field", field_r, (SURFACE_2,), field_states, padding=px(3))
+    wide = (px(900), px(80))
+    element("Rounded.field", field_r, (SURFACE_2,), field_states, padding=px(3), size=wide)
     element("Rounded.select", field_r, (SURFACE_2,), [("disabled", (SURFACE, BORDER)), ("focus", (SURFACE_2, ACCENT))],
-            padding=px(3))
-    element("Rounded.invalid", field_r, (SURFACE_2, DANGER), padding=px(3))
+            padding=px(3), size=wide)
+    element("Rounded.invalid", field_r, (SURFACE_2, DANGER), padding=px(3), size=wide)
     entry = _replace_element(style.layout("TEntry"), "Entry.field", "Rounded.field")
     style.layout("TEntry", entry)
     style.layout("Balance.TEntry", entry)
@@ -448,8 +472,12 @@ def _apply_rounded_shapes(root: tk.Misc, style: ttk.Style) -> None:
         if not bg or style.lookup(current, "background") == bg:
             return
         fitted = f"On{bg.lstrip('#')}.{current.split('.', 1)[1] if current.startswith('On') else current}"
-        style.configure(fitted, background=bg)
+        if style.lookup(fitted, "background") != bg:
+            style.configure(fitted, background=bg)  # restyles every widget, so the common ones are made below
         widget.configure(style=fitted)
 
+    for name in (*buttons, "Small.TButton", "TEntry", "Balance.TEntry", "Invalid.TEntry", "TCombobox", "TSpinbox"):
+        for bg in (BG, SURFACE):
+            style.configure(f"On{bg.lstrip('#')}.{name}", background=bg)
     for cls in ("TButton", "TEntry", "TCombobox", "TSpinbox"):
         root.bind_class(cls, "<Map>", match_parent, add="+")
