@@ -74,7 +74,7 @@ def main(argv: list[str] | None = None) -> int:
         root.deiconify()
         maximize(root)
         if settings_warning:
-            root.after(500, lambda: dialogs.showwarning("Settings not loaded", settings_warning, parent=root))
+            root.after(500, lambda: dialogs.showwarning("Configurations Not Loaded", settings_warning, parent=root))
         root.mainloop()
     finally:
         lock.release()

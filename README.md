@@ -28,11 +28,11 @@ python -m unittest discover -s tests -v
 
 ## Business rules
 
-Opening hours, prices and pass terms can be changed in **☰ menu → General settings**. They are saved in
+Opening hours, prices and pass terms can be changed in **☰ menu → Configurations**. They are saved in
 `settings.json` in the data folder and take effect after a restart; the defaults below live in `ontop/config.py`.
 The ☰ menu also has **Theme** and **Exit**. Midnight keeps the original square look; Dusk Blue, Lavender Haze,
 Alpine Dusk, Twinkle Sand, Violet Glass and Forest Lodge use rounded, borderless cards, buttons and fields
-(palettes live in `ontop/ui/theme.py`). **Clock format** (also in General settings) switches between 24-hour (18:30)
+(palettes live in `ontop/ui/theme.py`). **Clock Format** (also in Configurations) switches between 24-hour (18:30)
 and 12-hour (6:30 PM) times; in 12-hour mode the start and end time fields get an AM/PM button.
 
 - **Opening hours** 09:00–22:00. New or changed sessions must start and end inside them (no overnight sessions).
@@ -115,7 +115,7 @@ This Year selector, and the other filters still apply.
 main.py                   startup, single-instance lock, window
 ontop/config.py           devices and default opening hours, price list, pass settings
 ontop/settings.py         settings.json load/save, applied to config at startup
-ontop/ui/settings_dialog.py  General settings dialog
+ontop/ui/settings_dialog.py  Configurations dialog
 ontop/pricing.py          price-list calculations
 ontop/formatting.py       date/time/money parsing and formatting
 ontop/models.py           Session and MonthlyPass records, validation, booking rules

@@ -1,4 +1,4 @@
-"""General settings dialog: opening hours, price list and monthly pass terms."""
+"""Configurations dialog: opening hours, price list and monthly pass terms."""
 
 from __future__ import annotations
 
@@ -21,7 +21,7 @@ class SettingsDialog(tk.Toplevel):
 
     def __init__(self, master: tk.Misc, current: AppSettings, on_save: Callable[[AppSettings], bool]):
         super().__init__(master)
-        self.title("General settings")
+        self.title("Configurations")
         self.configure(background=theme.BG)
         self.resizable(False, False)
         self.transient(master.winfo_toplevel())
@@ -47,50 +47,50 @@ class SettingsDialog(tk.Toplevel):
     def _build(self):
         body = ttk.Frame(self, padding=20)
         body.pack(fill="both", expand=True)
-        ttk.Label(body, text="General settings", style="Title.TLabel").pack(anchor="w")
+        ttk.Label(body, text="Configurations", style="Title.TLabel").pack(anchor="w")
         ttk.Label(body, style="Subtitle.TLabel",
                   text="Saved in settings.json next to your session data. Changes apply after a restart.\n"
                        "Saved sessions keep the amounts they were saved with.").pack(anchor="w", pady=(2, 12))
 
         outer, f = card(body, padding=(16, 12))
         outer.pack(fill="x", pady=(0, 10))
-        ttk.Label(f, text="Opening hours & clock", style="CardSection.TLabel").grid(
+        ttk.Label(f, text="Opening Hours & Clock", style="CardSection.TLabel").grid(
             row=0, column=0, columnspan=4, sticky="w")
-        ttk.Label(f, text="Opens at", style="CardMuted.TLabel").grid(row=1, column=0, sticky="w", pady=6)
+        ttk.Label(f, text="Opens At", style="CardMuted.TLabel").grid(row=1, column=0, sticky="w", pady=6)
         TimeField(f, self.opening_var).grid(row=1, column=1, sticky="w", padx=(8, 20))
-        ttk.Label(f, text="Closes at", style="CardMuted.TLabel").grid(row=1, column=2, sticky="w")
+        ttk.Label(f, text="Closes At", style="CardMuted.TLabel").grid(row=1, column=2, sticky="w")
         TimeField(f, self.closing_var).grid(row=1, column=3, sticky="w", padx=(8, 0))
         ttk.Label(f, text="Clock", style="CardMuted.TLabel").grid(row=2, column=0, sticky="w", pady=(4, 0))
         clock = ttk.Frame(f, style="Inner.TFrame")
         clock.grid(row=2, column=1, columnspan=3, sticky="w", padx=(8, 0), pady=(4, 0))
-        for value, text in ((True, "24-hour (18:30)"), (False, "12-hour (6:30 PM)")):
+        for value, text in ((True, "24-Hour (18:30)"), (False, "12-Hour (6:30 PM)")):
             ttk.Radiobutton(clock, text=text, value=value, variable=self.clock_var,
                             style="Card.TRadiobutton").pack(side="left", padx=(0, 16))
 
         outer, f = card(body, padding=(16, 12))
         outer.pack(fill="x", pady=(0, 10))
-        ttk.Label(f, text="Price list (₹)", style="CardSection.TLabel").grid(row=0, column=0, columnspan=3, sticky="w")
+        ttk.Label(f, text="Price List (₹)", style="CardSection.TLabel").grid(row=0, column=0, columnspan=3, sticky="w")
         for col, group in enumerate(GROUPS, start=1):
             ttk.Label(f, text=group, style="Card.TLabel", font=theme.FONTS["bold"]).grid(
                 row=1, column=col, sticky="w", padx=(12, 0), pady=(6, 2))
         for row, players in enumerate(config.PLAYER_COUNTS, start=2):
-            label = f"{players} player{'s' if players != 1 else ''} · per hour"
+            label = f"{players} Player{'s' if players != 1 else ''} · per Hour"
             ttk.Label(f, text=label, style="CardMuted.TLabel").grid(row=row, column=0, sticky="w", pady=3)
             for col, group in enumerate(GROUPS, start=1):
                 ttk.Entry(f, textvariable=self.rate_vars[group][players], width=10).grid(
                     row=row, column=col, sticky="w", padx=(12, 0))
         row = len(config.PLAYER_COUNTS) + 2
-        ttk.Label(f, text="30 minutes (1 player)", style="CardMuted.TLabel").grid(row=row, column=0, sticky="w", pady=3)
+        ttk.Label(f, text="30 Minutes (1 Player)", style="CardMuted.TLabel").grid(row=row, column=0, sticky="w", pady=3)
         for col, group in enumerate(GROUPS, start=1):
             ttk.Entry(f, textvariable=self.half_vars[group], width=10).grid(row=row, column=col, sticky="w", padx=(12, 0))
 
         outer, f = card(body, padding=(16, 12))
         outer.pack(fill="x", pady=(0, 10))
-        ttk.Label(f, text="Monthly pass (new passes)", style="CardSection.TLabel").grid(
+        ttk.Label(f, text="Monthly Pass (New Passes)", style="CardSection.TLabel").grid(
             row=0, column=0, columnspan=4, sticky="w")
         for col, (text, var, width) in enumerate((("Price (₹)", self.pass_price_var, 10),
                                                   ("Hours", self.pass_hours_var, 6),
-                                                  ("Valid for (days)", self.pass_days_var, 6))):
+                                                  ("Valid for (Days)", self.pass_days_var, 6))):
             cell = ttk.Frame(f, style="Inner.TFrame")
             cell.grid(row=1, column=col, sticky="w", padx=(0, 18), pady=(6, 0))
             ttk.Label(cell, text=text, style="CardMuted.TLabel").pack(anchor="w")
@@ -105,7 +105,7 @@ class SettingsDialog(tk.Toplevel):
         buttons.pack(fill="x", pady=(10, 0))
         ttk.Button(buttons, text="Save", style="Accent.TButton", command=self._save).pack(side="left")
         ttk.Button(buttons, text="Cancel", command=self.destroy).pack(side="left", padx=(8, 0))
-        ttk.Button(buttons, text="Restore defaults", command=lambda: self._fill(self._defaults())).pack(side="right")
+        ttk.Button(buttons, text="Restore Defaults", command=lambda: self._fill(self._defaults())).pack(side="right")
 
     def _center_on(self, owner: tk.Misc):
         self.update_idletasks()
@@ -186,7 +186,7 @@ class SettingsDialog(tk.Toplevel):
         try:
             saved = self.on_save(result)
         except OSError as exc:
-            dialogs.showerror("Could not save settings", str(exc), parent=self)
+            dialogs.showerror("Could Not Save Configurations", str(exc), parent=self)
             return
         if saved:
             self.destroy()

@@ -111,7 +111,7 @@ class OnTopApp:
                       activeforeground=theme.ON_ACCENT, selectcolor=theme.ACCENT, font=theme.FONTS["base"],
                       relief="flat", borderwidth=1)
         self.menu = tk.Menu(self.root, tearoff=False, **colors)
-        self.menu.add_command(label="General settings…", command=self.open_settings)
+        self.menu.add_command(label="Configurations…", command=self.open_settings)
         self.theme_var = tk.StringVar(value=theme.CURRENT_THEME)
         themes = tk.Menu(self.menu, tearoff=False, **colors)
         for name in theme.THEME_NAMES:
@@ -120,10 +120,10 @@ class OnTopApp:
         self.menu.add_cascade(label="Theme", menu=themes)
         self.clock_var = tk.BooleanVar(value=self.settings.clock_24h)
         clock = tk.Menu(self.menu, tearoff=False, **colors)
-        for value, label in ((True, "24-hour (18:30)"), (False, "12-hour (6:30 PM)")):
+        for value, label in ((True, "24-Hour (18:30)"), (False, "12-Hour (6:30 PM)")):
             clock.add_radiobutton(label=label, value=value, variable=self.clock_var,
                                   command=lambda v=value: self.choose_clock(v))
-        self.menu.add_cascade(label="Clock format", menu=clock)
+        self.menu.add_cascade(label="Clock Format", menu=clock)
         self.menu.add_separator()
         self.menu.add_command(label="Exit", command=self.request_exit)
 
@@ -147,11 +147,11 @@ class OnTopApp:
         if not self._save_settings(dataclasses.replace(self.settings, clock_24h=clock_24h), what="Clock format"):
             self.clock_var.set(self.settings.clock_24h)
 
-    def _save_settings(self, new: AppSettings, what: str = "Settings") -> bool:
+    def _save_settings(self, new: AppSettings, what: str = "Configurations") -> bool:
         try:
             save_settings(self.settings_file, new)
         except (OSError, ValueError) as exc:
-            dialogs.showerror("Could not save settings", str(exc), parent=self.root)
+            dialogs.showerror("Could Not Save Configurations", str(exc), parent=self.root)
             return False
         self.settings = new
         if dialogs.askyesno(

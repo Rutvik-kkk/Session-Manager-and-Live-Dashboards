@@ -98,7 +98,7 @@ class GuiWorkflowTests(unittest.TestCase):
         self.assertEqual(app.nav_buttons[str(app.mapping)].cget("style"), "NavActive.TButton")
         labels = [app.menu.entrycget(i, "label") for i in range(app.menu.index("end") + 1)
                   if app.menu.type(i) != "separator"]
-        self.assertEqual(labels, ["General settings…", "Theme", "Clock format", "Exit"])
+        self.assertEqual(labels, ["Configurations…", "Theme", "Clock Format", "Exit"])
 
         self.e.name_var.set("Asha")
         self.ask.return_value = False
