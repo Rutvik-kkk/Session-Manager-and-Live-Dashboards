@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex">
+  <title>Dashboard · On Top Gaming</title>
+  <link rel="stylesheet" href="/css/app.css">
+  <script type="module" src="/js/dashboard.js"></script>
+</head>
+<body class="loading">
+  <header class="topbar">
+    <div class="brand"><span class="logo">▲</span> On Top Gaming</div>
+    <nav aria-label="Pages">
+      <a href="/" aria-current="page">Dashboard</a>
+      <a href="/mapping">Session Mapping</a>
+    </nav>
+    <div id="sync-status" class="sync" role="status"></div>
+    <div class="user"><span id="user-name"></span><button id="logout" class="ghost" type="button">Sign out</button></div>
+  </header>
+  <div id="stale-banner" class="banner" role="alert" hidden></div>
+
+  <main>
+    <div class="page-head">
+      <div>
+        <h1>Dashboard</h1>
+        <div class="muted small">All times are India Standard Time (Asia/Kolkata).</div>
+      </div>
+    </div>
+
+    <form id="filters" class="filters card" autocomplete="off">
+      <label>Period
+        <select name="period">
+          <option value="today">Today</option>
+          <option value="yesterday">Yesterday</option>
+          <option value="7d" selected>Last 7 days</option>
+          <option value="30d">Last 30 days</option>
+          <option value="month">This month</option>
+          <option value="last-month">Last month</option>
+          <option value="custom">Custom dates</option>
+        </select>
+      </label>
+      <label>From <input type="date" name="from"></label>
+      <label>To <input type="date" name="to"></label>
+      <label>Device <select name="device"><option value="">All devices</option></select></label>
+      <label>Payment method <select name="method"><option value="">All methods</option></select></label>
+      <label>Payment status <select name="status"><option value="">All statuses</option></select></label>
+      <label>Customer <input type="search" name="q" placeholder="Search by name" maxlength="80"></label>
+      <button type="button" id="reset-filters" class="ghost">Reset</button>
+    </form>
+
+    <p id="page-error" class="banner error" role="alert" hidden></p>
+
+    <section class="stats" id="stats" aria-label="Totals"></section>
+
+    <section class="charts">
+      <div class="card chart wide">
+        <h2>Daily earnings</h2>
+        <div class="legend"><span><i class="swatch"></i>Charged</span><span><i class="swatch alt"></i>Collected</span></div>
+        <div id="chart-daily"></div>
+      </div>
+      <div class="card chart"><h2>Busy hours <span class="muted small">(sessions started)</span></h2><div id="chart-hours"></div></div>
+      <div class="card"><h2>Earnings by device</h2><div id="chart-devices" class="hbars"></div></div>
+      <div class="card"><h2>Collected by payment method</h2><div id="chart-methods" class="hbars"></div></div>
+      <div class="card"><h2>Payment status</h2><div id="chart-status" class="hbars"></div></div>
+    </section>
+
+    <section class="card">
+      <h2>Session history</h2>
+      <div class="table-wrap">
+        <table id="history">
+          <thead>
+            <tr>
+              <th data-sort="start">Start</th>
+              <th data-sort="customer">Customer</th>
+              <th data-sort="device">Device</th>
+              <th data-sort="players" class="num">Players</th>
+              <th data-sort="duration" class="num">Duration</th>
+              <th data-sort="total" class="num">Charged</th>
+              <th data-sort="paid" class="num">Paid</th>
+              <th data-sort="balance" class="num">Balance</th>
+              <th data-sort="method">Method</th>
+              <th data-sort="status">Status</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <div class="pager">
+        <span id="page-info" class="muted small"></span>
+        <div class="buttons">
+          <label class="muted small">Rows
+            <select id="page-size"><option>25</option><option>50</option><option>100</option></select>
+          </label>
+          <button type="button" id="prev-page">Previous</button>
+          <button type="button" id="next-page">Next</button>
+        </div>
+      </div>
+    </section>
+
+    <div class="footer-note"><span id="updated-at"></span><button type="button" id="refresh" class="ghost">Refresh now</button></div>
+  </main>
+</body>
+</html>

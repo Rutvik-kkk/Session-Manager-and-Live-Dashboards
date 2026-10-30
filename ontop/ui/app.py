@@ -42,6 +42,7 @@ class OnTopApp:
         self.settings = settings or AppSettings()
         self.settings_file = settings_file or settings_path(store.path.parent)
         self.restart_requested = False
+        self.sync = None
         root.title(APP_TITLE)
         root.minsize(1000, 660)
         theme.set_palette(self.settings.theme)
@@ -92,6 +93,12 @@ class OnTopApp:
         ttk.Label(brand, text="On Top Gaming", style="Title.TLabel").pack(side="left")
         self.clock = ttk.Label(header, style="Subtitle.TLabel")
         self.clock.pack(side="right")
+        self.sync_button = ttk.Button(header, text="Sync Now", style="Small.TButton", takefocus=False,
+                                      command=self.sync_now)
+        self.sync_button.pack(side="right", padx=(8, 24))
+        self.sync_label = ttk.Label(header, style="Muted.TLabel", text="Online sync off", cursor="hand2")
+        self.sync_label.pack(side="right")
+        self.sync_label.bind("<Button-1>", lambda e: self.show_sync_details())
         self.nav_bar = ttk.Frame(header)
         self.nav_bar.pack(side="left", padx=(28, 0))
 
@@ -112,6 +119,7 @@ class OnTopApp:
                       relief="flat", borderwidth=1)
         self.menu = tk.Menu(self.root, tearoff=False, **colors)
         self.menu.add_command(label="Configurations…", command=self.open_settings)
+        self.menu.add_command(label="Sync Now", command=self.sync_now)
         self.theme_var = tk.StringVar(value=theme.CURRENT_THEME)
         themes = tk.Menu(self.menu, tearoff=False, **colors)
         for name in theme.THEME_NAMES:
@@ -126,6 +134,25 @@ class OnTopApp:
         self.menu.add_cascade(label="Clock Format", menu=clock)
         self.menu.add_separator()
         self.menu.add_command(label="Exit", command=self.request_exit)
+
+    def attach_sync(self, controller):
+        """Connect the online-sync controller (ontop.sync.SyncController) to the header."""
+        self.sync = controller
+        controller.on_status = self._show_sync_status
+
+    def _show_sync_status(self, text: str, level: str):
+        self.sync_label.configure(text=text, style="Error.TLabel" if level == "error" else "Muted.TLabel")
+        self.sync_button.state(["disabled"] if level == "busy" else ["!disabled"])
+
+    def sync_now(self):
+        if self.sync is not None and self.sync.enabled:
+            self.sync.sync_now()
+        else:
+            self.show_sync_details()
+
+    def show_sync_details(self):
+        text = self.sync.details() if self.sync is not None else "Online sync is not available."
+        dialogs.showinfo("Online sync", text, parent=self.root)
 
     def show_menu(self):
         b = self.menu_button

@@ -2,3 +2,5 @@
 matplotlib>=3.7,<4
 # Cross-platform single-instance lock for the data folder (fcntl on Unix, msvcrt on Windows)
 filelock>=3.12,<5
+# Online dashboard sync (ontop/sync.py) needs no extra packages: it uses the standard library's
+# urllib + ssl, which verifies HTTPS certificates against the operating system's trusted roots.

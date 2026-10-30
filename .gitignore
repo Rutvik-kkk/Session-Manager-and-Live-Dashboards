@@ -4,3 +4,13 @@ __pycache__/
 venv/
 # Live café data stays on the machine that runs the app.
 data/
+# Real customer data wherever it is copied, and the online-sync bookkeeping.
+sessions.json
+sessions.*.json
+sync_state.json
+# Online sync credentials (copy sync_config.example.json to create it).
+sync_config.json
+# Website secrets and local Wrangler/D1 state (see cafe-web/.gitignore).
+cafe-web/.dev.vars
+cafe-web/.wrangler/
+cafe-web/node_modules/

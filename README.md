@@ -109,6 +109,23 @@ profit. **Earnings** shows money received per day (or week/month): session payme
 **Busy hours** shows how many sessions were playing during each hour; it has its own This Week / This Month /
 This Year selector, and the other filters still apply.
 
+## Online dashboard (optional)
+
+The `cafe-web/` folder is a Cloudflare Worker + D1 website that shows the same data online, behind a
+username/password login. Setup, local testing and deployment are described in [cafe-web/README.md](cafe-web/README.md).
+
+To turn on uploading, copy `sync_config.example.json` to `sync_config.json` **next to `main.py`** and fill in the
+dashboard address and the `SYNC_TOKEN` secret. Without that file the app works exactly as before (offline). With it:
+
+- New and changed sessions and passes are uploaded at startup and every 300 seconds (`interval_seconds`), over HTTPS,
+  in the background — the window never waits for the network.
+- The header shows the last successful sync (click it for details) and has a **Sync Now** button; **Sync Now** is also in the ☰ menu.
+- The first sync uploads every record; later ones send only what changed. Upload progress is kept in
+  `sync_state.json` in the data folder. Deleting it is safe; the next sync just checks everything again.
+- Session notes and pass holders' names and phone numbers are never uploaded.
+
+`sync_config.json`, `sync_state.json` and `sessions.json` are git-ignored. Keep the token private.
+
 ## Project layout
 
 ```
@@ -121,6 +138,7 @@ ontop/formatting.py       date/time/money parsing and formatting
 ontop/models.py           Session and MonthlyPass records, validation, booking rules
 ontop/analytics.py        filters, dashboard metrics, timeline geometry
 ontop/storage.py          JSON load/validate/upgrade, atomic save, instance lock
+ontop/sync.py             background upload to the online dashboard
 ontop/ui/app.py           theme, header, tab navigation, cross-tab refresh
 ontop/ui/entry_tab.py     Session Entry → New Session
 ontop/ui/passes_tab.py    Session Entry → Monthly Passes
@@ -129,4 +147,6 @@ ontop/ui/mapping_tab.py   Session Mapping (Canvas timeline)
 ontop/ui/dashboard_tab.py Dashboard (Matplotlib via FigureCanvasTkAgg)
 ontop/ui/widgets.py       tooltip, scrollable frame, date picker, sortable table
 tests/                    unit and GUI workflow tests
+sync_config.example.json  template for sync_config.json
+cafe-web/                 online dashboard (Cloudflare Worker, static site, D1 schema)
 ```

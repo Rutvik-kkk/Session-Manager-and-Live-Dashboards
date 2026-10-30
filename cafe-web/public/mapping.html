@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex">
+  <title>Session Mapping · On Top Gaming</title>
+  <link rel="stylesheet" href="/css/app.css">
+  <script type="module" src="/js/mapping.js"></script>
+</head>
+<body class="loading">
+  <header class="topbar">
+    <div class="brand"><span class="logo">▲</span> On Top Gaming</div>
+    <nav aria-label="Pages">
+      <a href="/">Dashboard</a>
+      <a href="/mapping" aria-current="page">Session Mapping</a>
+    </nav>
+    <div id="sync-status" class="sync" role="status"></div>
+    <div class="user"><span id="user-name"></span><button id="logout" class="ghost" type="button">Sign out</button></div>
+  </header>
+  <div id="stale-banner" class="banner" role="alert" hidden></div>
+
+  <main>
+    <div class="page-head">
+      <div>
+        <h1>Session Mapping</h1>
+        <div class="muted small" id="day-title"></div>
+      </div>
+      <div class="day-nav">
+        <button type="button" id="prev-day" aria-label="Previous day">◀</button>
+        <input type="date" id="day" aria-label="Day">
+        <button type="button" id="next-day" aria-label="Next day">▶</button>
+        <button type="button" id="today">Today</button>
+      </div>
+    </div>
+
+    <p id="page-error" class="banner error" role="alert" hidden></p>
+
+    <section class="stats" id="day-stats" aria-label="Day totals"></section>
+
+    <section class="card">
+      <h2>Devices <span class="muted small">(IST)</span></h2>
+      <div class="timeline" id="timeline"></div>
+      <div class="key">
+        <span><i class="Paid"></i>Paid</span><span><i class="Partially"></i>Partially paid</span><span><i class="Unpaid"></i>Unpaid</span>
+      </div>
+    </section>
+
+    <div class="footer-note"><span id="updated-at"></span><button type="button" id="refresh" class="ghost">Refresh now</button></div>
+  </main>
+</body>
+</html>

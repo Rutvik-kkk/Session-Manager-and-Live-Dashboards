@@ -3,6 +3,9 @@
 Usage:
     python main.py                  # data stored in ./data/sessions.json
     python main.py --data-dir PATH  # use a different data folder (e.g. for training)
+
+Online dashboard sync is enabled by sync_config.json next to this file
+(see sync_config.example.json and cafe-web/README.md).
 """
 
 from __future__ import annotations
@@ -66,17 +69,26 @@ def main(argv: list[str] | None = None) -> int:
         root.destroy()
         return 1
 
+    from ontop.sync import STATE_FILE, SyncController, config_path, load_config
+
     app = None
+    sync = None
     try:
         store = SessionStore(data_dir / "sessions.json")
         store.load()
         app = OnTopApp(root, store, settings, settings_file)
+        sync_config, sync_problem = load_config(config_path(APP_DIR))
+        sync = SyncController(root, store, sync_config, sync_problem, data_dir / STATE_FILE)
+        app.attach_sync(sync)
+        sync.start()
         root.deiconify()
         maximize(root)
         if settings_warning:
             root.after(500, lambda: dialogs.showwarning("Configurations Not Loaded", settings_warning, parent=root))
         root.mainloop()
     finally:
+        if sync is not None:
+            sync.stop()
         lock.release()
     if app is not None and app.restart_requested:
         flags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0

@@ -1,0 +1,19 @@
+{
+  "name": "ontop-gaming-dashboard",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "types": "wrangler types",
+    "check": "wrangler types && tsc -p .",
+    "db:init:local": "wrangler d1 execute ontop-gaming-db --local --file schema.sql",
+    "db:init:remote": "wrangler d1 execute ontop-gaming-db --remote --file schema.sql",
+    "create-admin": "node scripts/create-admin.mjs",
+    "dev": "wrangler dev",
+    "smoke": "node scripts/smoke-test.mjs",
+    "deploy": "wrangler deploy"
+  },
+  "devDependencies": {
+    "typescript": "^7.0.2",
+    "wrangler": "^4.156.0"
+  }
+}

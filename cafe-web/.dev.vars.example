@@ -1,0 +1,4 @@
+# Copy to .dev.vars for local development only (`npm run dev`). .dev.vars is git-ignored.
+# Generate a token with:  node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))"
+# Use a different token in production (`npx wrangler secret put SYNC_TOKEN`).
+SYNC_TOKEN=replace-with-at-least-32-random-characters

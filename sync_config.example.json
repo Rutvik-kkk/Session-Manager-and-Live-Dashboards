@@ -1,0 +1,6 @@
+{
+  "enabled": true,
+  "url": "https://ontop-gaming-dashboard.YOUR-SUBDOMAIN.workers.dev",
+  "token": "PASTE-THE-SYNC_TOKEN-VALUE-HERE-(at-least-32-characters)",
+  "interval_seconds": 300
+}
