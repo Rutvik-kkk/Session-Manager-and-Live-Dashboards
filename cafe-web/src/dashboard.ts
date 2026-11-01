@@ -12,6 +12,8 @@ import {
 } from "./util";
 
 const MAX_PAGE_SIZE = 100;
+const PAYMENT_METHODS = ["Cash", "UPI", "Card", "Other"];
+const PAYMENT_STATUSES = ["Paid", "Unpaid", "Partially Paid"];
 const BUSY_PERIODS = ["week", "month", "year", "all"] as const;
 type BusyPeriod = (typeof BUSY_PERIODS)[number];
 
@@ -23,6 +25,10 @@ interface Filters {
   method: string;
   status: string;
   q: string;
+}
+
+function unique(values: string[]): string[] {
+  return [...new Set(values.filter(Boolean))].sort((a, b) => a.localeCompare(b, "en", { sensitivity: "base" }));
 }
 
 function option(url: URL, key: string, max = 40): string {
@@ -41,7 +47,7 @@ function parseFilters(url: URL): Filters {
   if (url.searchParams.get("all") === "1") return { from: null, to: null, ...base };
   const today = istDate(Date.now());
   const to = url.searchParams.get("to") || today;
-  const from = url.searchParams.get("from") || addDays(to, -6);
+  const from = url.searchParams.get("from") || today;
   if (!isIsoDate(from) || !isIsoDate(to)) throw new HttpError(400, "Dates must be YYYY-MM-DD.");
   if (from > to) throw new HttpError(400, "The 'from' date must not be after the 'to' date.");
   return { from, to, ...base };
@@ -109,7 +115,9 @@ export async function handleDashboard(url: URL, env: AppEnv): Promise<Response> 
   }
   if (f.q) passParts.push("0");
 
-  const [summary, daily, byDevice, byMethod, busy, passDaily, options] = await env.DB.batch<Record<string, unknown>>([
+  const [summary, daily, byDevice, byMethod, busy, passDaily, settingsRow] = await env.DB.batch<
+    Record<string, unknown>
+  >([
     q(`SELECT COUNT(*) AS sessions, COALESCE(SUM(total_paise), 0) AS revenue_paise,
               COALESCE(SUM(paid_paise), 0) AS collected_paise, COALESCE(SUM(duration_minutes), 0) AS minutes,
               COUNT(DISTINCT lower(trim(customer_name))) AS customers,
@@ -134,13 +142,7 @@ export async function handleDashboard(url: URL, env: AppEnv): Promise<Response> 
       `SELECT purchased_on AS date, COUNT(*) AS count, SUM(price_paise) AS revenue_paise
          FROM cafe_passes WHERE ${passParts.join(" AND ")} GROUP BY purchased_on ORDER BY purchased_on`,
     ).bind(...passParams),
-    env.DB.prepare(
-      `SELECT 'device' AS kind, device AS value FROM cafe_sessions
-       UNION SELECT 'method', payment_method FROM cafe_sessions
-       UNION SELECT 'method', payment_method FROM cafe_passes
-       UNION SELECT 'status', payment_status FROM cafe_sessions
-       ORDER BY 1, 2`,
-    ),
+    env.DB.prepare(`SELECT value FROM meta WHERE key = 'cafe_settings'`),
   ]);
 
   // Sessions playing during each hour of the day: 10:30–12:00 counts for 10:00 and 11:00.
@@ -154,11 +156,12 @@ export async function handleDashboard(url: URL, env: AppEnv): Promise<Response> 
 
   const s = summary.results[0] as Record<string, number>;
   const passRows = passDaily.results as { date: string; count: number; revenue_paise: number }[];
-  const settings = await cafeSettings(env);
-  const opts: Record<string, string[]> = { device: [...settings.devices], method: [], status: [] };
-  for (const row of options.results as { kind: string; value: string }[]) {
-    if (!opts[row.kind]?.includes(row.value)) opts[row.kind]?.push(row.value);
-  }
+  const settings = parseCafeSettings(settingsRow.results[0]?.value as string | undefined);
+  const opts = {
+    device: unique([...settings.devices, ...(byDevice.results as { device: string }[]).map((d) => d.device)]),
+    method: unique([...PAYMENT_METHODS, ...(byMethod.results as { method: string }[]).map((m) => m.method)]),
+    status: [...PAYMENT_STATUSES],
+  };
   return json({
     filters: f,
     summary: {
@@ -219,13 +222,17 @@ export async function handleSessions(url: URL, env: AppEnv): Promise<Response> {
   });
 }
 
-async function cafeSettings(env: AppEnv): Promise<{ devices: string[]; opening: string | null; closing: string | null }> {
-  const row = await env.DB.prepare(`SELECT value FROM meta WHERE key = 'cafe_settings'`).first<{ value: string }>();
+function parseCafeSettings(raw: string | undefined): { devices: string[]; opening: string | null; closing: string | null } {
   try {
-    return { devices: [], opening: null, closing: null, ...(row ? JSON.parse(row.value) : {}) };
+    return { devices: [], opening: null, closing: null, ...(raw ? JSON.parse(raw) : {}) };
   } catch {
     return { devices: [], opening: null, closing: null };
   }
+}
+
+async function cafeSettings(env: AppEnv): Promise<{ devices: string[]; opening: string | null; closing: string | null }> {
+  const row = await env.DB.prepare(`SELECT value FROM meta WHERE key = 'cafe_settings'`).first<{ value: string }>();
+  return parseCafeSettings(row?.value);
 }
 
 export async function handleMapping(url: URL, env: AppEnv): Promise<Response> {
@@ -250,17 +257,19 @@ export async function handleMapping(url: URL, env: AppEnv): Promise<Response> {
 
 export async function handleStatus(env: AppEnv): Promise<Response> {
   const { results } = await env.DB.prepare(
-    `SELECT key, value FROM meta WHERE key IN ('last_sync_at', 'last_sync_attempt_at')`,
+    `SELECT key, value FROM meta WHERE key IN ('last_sync_at', 'last_sync_attempt_at', 'data_version')`,
   ).all<{ key: string; value: string }>();
-  const meta = Object.fromEntries(results.map((r) => [r.key, Number(r.value)]));
+  const meta = Object.fromEntries(results.map((r) => [r.key, r.value]));
   const now = nowSeconds();
-  const last = meta.last_sync_at ?? null;
+  const last = meta.last_sync_at !== undefined ? Number(meta.last_sync_at) : null;
+  const version = Number(meta.data_version);
   return json({
     server_time: now,
-    last_sync_at: last,
-    last_sync_attempt_at: meta.last_sync_attempt_at ?? null,
+    last_sync_at: Number.isFinite(last) ? last : null,
+    last_sync_attempt_at: meta.last_sync_attempt_at !== undefined ? Number(meta.last_sync_attempt_at) : null,
+    data_version: Number.isFinite(version) ? version : 0,
     sync_interval_seconds: SYNC_INTERVAL_SECONDS,
     stale_after_seconds: STALE_AFTER_SECONDS,
-    stale: last === null || now - last > STALE_AFTER_SECONDS,
+    stale: last === null || !Number.isFinite(last) || now - last > STALE_AFTER_SECONDS,
   });
 }

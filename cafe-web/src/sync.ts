@@ -243,6 +243,14 @@ export async function handleSync(request: Request, env: AppEnv): Promise<Respons
     env.DB.prepare(`INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`)
       .bind(key, value);
   writes.push(setMeta("last_sync_attempt_at", String(now)));
+  if (pending.length) {
+    writes.push(
+      env.DB.prepare(
+        `INSERT INTO meta (key, value) VALUES ('data_version', '1')
+         ON CONFLICT(key) DO UPDATE SET value = CAST(value AS INTEGER) + 1`,
+      ),
+    );
+  }
   if (final) {
     writes.push(setMeta("last_sync_at", String(now)));
     const settings = cafeSettings(body.cafe);

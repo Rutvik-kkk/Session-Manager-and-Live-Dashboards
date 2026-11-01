@@ -5,7 +5,7 @@ import {
 const SVG = "http://www.w3.org/2000/svg";
 const form = document.getElementById("filters");
 const DEFAULTS = {
-  period: "7d", from: "", to: "", device: "", method: "", status: "", q: "", group: "day",
+  period: "today", from: "", to: "", device: "", method: "", status: "", q: "", group: "day",
   dev_metric: "count", dev_sort: "name", dev_order: "asc", busy: "month",
   sort: "start", dir: "desc", page: 1, page_size: 25,
 };

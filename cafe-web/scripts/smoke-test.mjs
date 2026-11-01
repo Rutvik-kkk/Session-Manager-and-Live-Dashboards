@@ -119,13 +119,19 @@ check("/api/me returns the user and a CSRF token", me.data?.username === USER &&
   const firstOk = ["inserted", "unchanged"].includes(status(first, "smoke-a")) && ["inserted", "unchanged"].includes(status(first, "smoke-pass", "passes"));
   check("first upload inserts sessions and passes", first.res.status === 200 && firstOk, first.text);
   check("sync returns the dataset id", typeof first.data?.dataset_id === "string" && first.data.dataset_id.length === 32);
+  const v1 = (await call("/api/status", { cookie })).data?.data_version;
+  check("a real upload increases data_version", Number.isInteger(v1) && v1 > 0, v1);
 
   const again = await call("/api/sync", { method: "POST", headers: bearer, body: { sessions: [a] } });
   check("re-sending the same record is a no-op", status(again, "smoke-a") === "unchanged", again.text);
+  const v2 = (await call("/api/status", { cookie })).data?.data_version;
+  check("an unchanged upload leaves data_version as it is", v2 === v1, `${v1} -> ${v2}`);
 
   const newer = session("smoke-a", { revision: a.revision + 1, paid: 5000, status: "Partially Paid" });
   const upd = await call("/api/sync", { method: "POST", headers: bearer, body: { sessions: [newer] } });
   check("a newer revision updates the row", status(upd, "smoke-a") === "updated", upd.text);
+  const v3 = (await call("/api/status", { cookie })).data?.data_version;
+  check("an update increases data_version", v3 === v1 + 1, `${v1} -> ${v3}`);
 
   const older = session("smoke-a", { revision: a.revision, paid: 0, status: "Unpaid" });
   const stale = await call("/api/sync", { method: "POST", headers: bearer, body: { sessions: [older] } });
@@ -162,6 +168,7 @@ check("/api/me returns the user and a CSRF token", me.data?.username === USER &&
   check("mapping returns devices and sessions", map.data?.devices?.includes("PS5(Y)") && map.data.sessions.length >= 3, map.text);
   const st = await call("/api/status", { cookie });
   check("status shows a recent desktop sync", st.data?.last_sync_at && st.data.stale === false, st.text);
+  check("status includes data_version", Number.isInteger(st.data?.data_version));
   const badDate = await call("/api/dashboard?from=2026-13-01", { cookie });
   check("invalid dates are rejected", badDate.res.status === 400, badDate.res.status);
 }

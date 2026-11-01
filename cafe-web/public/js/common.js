@@ -2,7 +2,7 @@
 // nothing private is stored in these static files.
 
 export const TZ = "Asia/Kolkata";
-export const REFRESH_SECONDS = 300;
+export const POLL_SECONDS = 60;
 
 const moneyFmt = new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 2 });
 const timeFmt = new Intl.DateTimeFormat("en-IN", { timeZone: TZ, hour: "numeric", minute: "2-digit", hour12: true });
@@ -121,7 +121,7 @@ export async function showSyncStatus() {
     const ago = fmtAgo(Math.max(0, s.server_time - s.last_sync_at));
     box.replaceChildren(el("span", { class: "dot" }),
       `Desktop synced ${fmtDateTime(s.last_sync_at * 1000)} IST (${ago})`);
-    box.title = `The café PC uploads changes every ${s.sync_interval_seconds / 60} minutes.`;
+    box.title = `The café PC uploads after every save and every ${s.sync_interval_seconds / 60} minutes.`;
   } else {
     box.replaceChildren(el("span", { class: "dot" }), "Desktop has not synced yet");
   }
@@ -130,27 +130,42 @@ export async function showSyncStatus() {
     ? `Data may be out of date: the café PC last synced ${fmtAgo(s.server_time - s.last_sync_at)}. ` +
       "Check that the desktop app is open and the PC is online."
     : "No data has been uploaded yet. Start the desktop app with online sync configured.";
+  return s;
 }
 
-/** Run `load` now and every REFRESH_SECONDS; the caller's own state (filters) is reused each time. */
+/**
+ * Load dashboard data on first view, when filters change, and when the café PC uploads a change.
+ * While the tab is open and idle, only `/api/status` is polled (a few meta rows). Hidden tabs pause.
+ */
 export function startAutoRefresh(load) {
   let running = false;
-  const run = async () => {
+  let loadedVersion;
+  const run = async (force = false) => {
     if (running) return;
+    if (document.hidden && !force) return;
     running = true;
     try {
-      await Promise.all([load(), showSyncStatus()]);
+      const s = await showSyncStatus();
+      if (force || loadedVersion === undefined || s.data_version !== loadedVersion) {
+        await load();
+      }
+      loadedVersion = s.data_version;
       showError("");
       const stamp = document.getElementById("updated-at");
-      if (stamp) stamp.textContent = `Updated ${fmtTime(Date.now())} IST · refreshes every ${REFRESH_SECONDS / 60} minutes`;
+      if (stamp) {
+        stamp.textContent = `Updated ${fmtTime(Date.now())} IST · checks for new uploads every minute`;
+      }
     } catch (err) {
       if (err.status !== 401) showError(err.message);
     } finally {
       running = false;
     }
   };
-  setInterval(run, REFRESH_SECONDS * 1000);
-  return run;
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden) run(false);
+  });
+  setInterval(() => run(false), POLL_SECONDS * 1000);
+  return () => run(true);
 }
 
 export function showError(message) {

@@ -28,7 +28,7 @@ from ..analytics import (  # noqa: E402
     METRIC_COUNT,
     METRIC_HOURS,
     PRESET_CUSTOM,
-    PRESET_LAST_7,
+    PRESET_TODAY,
     PRESET_THIS_MONTH,
     SORT_DEVICE_NAME,
     SessionFilter,
@@ -81,7 +81,7 @@ matplotlib.rcParams.update(
 
 @dataclass(frozen=True)
 class DashboardFilters:
-    preset: str = PRESET_LAST_7
+    preset: str = PRESET_TODAY
     custom_start: date | None = None
     custom_end: date | None = None
     device: str = ALL_DEVICES
@@ -137,7 +137,7 @@ class DashboardTab(ttk.Frame):
     def __init__(self, master: tk.Misc, app: "OnTopApp"):
         super().__init__(master)
         self.app = app
-        self.preset_var = tk.StringVar(value=PRESET_LAST_7)
+        self.preset_var = tk.StringVar(value=PRESET_TODAY)
         self.from_var = tk.StringVar()
         self.to_var = tk.StringVar()
         self.device_var = tk.StringVar(value=ALL_DEVICES)

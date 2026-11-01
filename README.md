@@ -102,7 +102,7 @@ a new session for that holder.
 headings to sort. Double-click a row (or use **Edit Selected**) to edit it. The totals below the table
 cover the filtered rows.
 
-**Dashboard**: choose a date range (including This Week and This Year), device, method, status, customer and
+**Dashboard**: opens on **Today**. Choose a date range (including This Week, This Year and All Time), device, method, status, customer and
 grouping, then **Apply Filters**. The cards, charts and breakdown table use the same filtered sessions.
 "Amount received" is money received against those sessions, not cash collected in the date range, and not
 profit. **Earnings** shows money received per day (or week/month): session payments plus monthly pass sales.

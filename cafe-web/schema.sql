@@ -78,3 +78,6 @@ CREATE TABLE IF NOT EXISTS meta (
 -- Random id for this database. If the database is recreated, the desktop app notices the new id
 -- and uploads every record again instead of assuming the server already has them.
 INSERT OR IGNORE INTO meta (key, value) VALUES ('dataset_id', lower(hex(randomblob(16))));
+-- Bumped only when an upload actually inserts or updates a session or pass. The website polls
+-- this one row instead of re-reading café data when nothing has changed.
+INSERT OR IGNORE INTO meta (key, value) VALUES ('data_version', '0');

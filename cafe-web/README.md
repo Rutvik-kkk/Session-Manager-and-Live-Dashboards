@@ -240,8 +240,9 @@ Until both match, the app shows "sync token rejected" and keeps its changes queu
 - On phones, the Session Mapping timeline keeps a readable width per hour and scrolls sideways, with the device
   names pinned; it opens at the current time (today) or the first session.
 - All times are shown in Asia/Kolkata (IST). Daily grouping and the mapping page use IST calendar days.
-- Data refreshes every 300 seconds without reloading the page; filters live in the URL, so they survive both
-  the refresh and a page reload.
+- Opens on **Today**. While the tab is open, the browser asks `/api/status` every 60 seconds (a few `meta` rows).
+  Cards, charts and the table are fetched again only when `data_version` changes, when you change filters, or
+  when you click Refresh now. Hidden tabs pause. Filters live in the URL.
 - The header shows the last successful desktop sync. If no sync has arrived for 15 minutes (three missed
   uploads), a "data may be out of date" banner is shown.
 
