@@ -193,7 +193,8 @@ Until both match, the app shows "sync token rejected" and keeps its changes queu
 
 ### Desktop upload (`ontop/sync.py`)
 
-- Runs at startup and every `interval_seconds` (default 300), plus **Sync Now** in the header and ☰ menu.
+- Runs at startup, right after every saved session or pass (new or edited), every `interval_seconds` (default 300),
+  and on **Sync Now** in the header and ☰ menu. A save made while an upload is running is sent as soon as it finishes.
 - Tkinter is never blocked: the Tk thread only copies the records (about 1–2 ms for a few hundred sessions);
   hashing, HTTPS requests, retries and saving `sync_state.json` happen on a background thread, and results
   come back through a queue.
@@ -232,6 +233,12 @@ Until both match, the app shows "sync token rejected" and keeps its changes queu
 
 ### Dashboard
 
+- The cards and charts match the desktop Dashboard: Earnings (session payments + pass sales), Session activity,
+  Device comparison (count / hours / charges, sortable), Payment methods and Busy hours (sessions playing during
+  each hour, with its own This week / This month / This year / All time period). Date ranges include This week,
+  This year and All time, and charts can be grouped by day, week or month; long ranges are drawn as lines.
+- On phones, the Session Mapping timeline keeps a readable width per hour and scrolls sideways, with the device
+  names pinned; it opens at the current time (today) or the first session.
 - All times are shown in Asia/Kolkata (IST). Daily grouping and the mapping page use IST calendar days.
 - Data refreshes every 300 seconds without reloading the page; filters live in the URL, so they survive both
   the refresh and a page reload.

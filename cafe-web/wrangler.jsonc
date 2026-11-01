@@ -21,7 +21,7 @@
       "database_name": "ontop-gaming-db",
       // Replace with the id printed by `npx wrangler d1 create ontop-gaming-db` before deploying.
       // Local development (`--local`, `wrangler dev`) works with this placeholder.
-      "database_id": "00000000-0000-0000-0000-000000000000"
+      "database_id": "a5b47a38-8dff-45bf-ab8f-c29d6fe664e5"
     }
   ],
 

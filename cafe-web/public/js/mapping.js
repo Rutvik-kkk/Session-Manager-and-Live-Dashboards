@@ -88,8 +88,24 @@ function render(data) {
   });
 
   const timeline = document.getElementById("timeline");
-  timeline.replaceChildren(hours, ...lanes);
+  const inner = el("div", { class: "inner" }, el("div", { class: "hours-row" }, el("div", { class: "corner" }), hours), ...lanes);
+  inner.style.setProperty("--hours", String(span / 60));
+  const keepScroll = timeline.dataset.date === data.date;
+  const scrollLeft = timeline.scrollLeft;
+  timeline.replaceChildren(inner);
   if (!sessions.length) timeline.append(el("p", { class: "muted", text: "No sessions on this day." }));
+  timeline.dataset.date = data.date;
+  if (keepScroll) {
+    timeline.scrollLeft = scrollLeft; // auto-refresh keeps the user's position
+  } else if (timeline.scrollWidth > timeline.clientWidth) {
+    // A new day on a narrow screen: start at the current time (today) or the first session.
+    const focus = data.date === todayIST() && now >= start && now <= end
+      ? now - 60
+      : sessions.length ? Math.min(...sessions.map((s) => istMinutes(s.start_ms))) - 30 : start;
+    const nameW = timeline.querySelector(".lane .name")?.offsetWidth ?? 0;
+    const trackW = inner.offsetWidth - nameW;
+    timeline.scrollLeft = Math.max(0, (trackW * (focus - start)) / span);
+  }
 }
 
 async function load() {

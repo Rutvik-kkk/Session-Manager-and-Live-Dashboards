@@ -107,7 +107,7 @@ grouping, then **Apply Filters**. The cards, charts and breakdown table use the 
 "Amount received" is money received against those sessions, not cash collected in the date range, and not
 profit. **Earnings** shows money received per day (or week/month): session payments plus monthly pass sales.
 **Busy hours** shows how many sessions were playing during each hour; it has its own This Week / This Month /
-This Year selector, and the other filters still apply.
+This Year / All Time selector, and the other filters still apply.
 
 ## Online dashboard (optional)
 
@@ -117,8 +117,8 @@ username/password login. Setup, local testing and deployment are described in [c
 To turn on uploading, copy `sync_config.example.json` to `sync_config.json` **next to `main.py`** and fill in the
 dashboard address and the `SYNC_TOKEN` secret. Without that file the app works exactly as before (offline). With it:
 
-- New and changed sessions and passes are uploaded at startup and every 300 seconds (`interval_seconds`), over HTTPS,
-  in the background — the window never waits for the network.
+- New and changed sessions and passes are uploaded at startup, right after every saved entry or edit, and every
+  300 seconds (`interval_seconds`), over HTTPS, in the background — the window never waits for the network.
 - The header shows the last successful sync (click it for details) and has a **Sync Now** button; **Sync Now** is also in the ☰ menu.
 - The first sync uploads every record; later ones send only what changed. Upload progress is kept in
   `sync_state.json` in the data folder. Deleting it is safe; the next sync just checks everything again.

@@ -254,6 +254,21 @@ class GuiWorkflowTests(unittest.TestCase):
         self.assertEqual(rows[0]["notes"], "Birthday group\nBring extra controller (done)")
         self.assertEqual(self.app.entries.search_var.get(), "ash")
 
+    def test_every_save_and_update_starts_an_upload(self):
+        sync = mock.Mock(enabled=True)
+        self.app.sync = sync
+        e = self.e
+        self.fill(paid="0")
+        e.save()
+        self.assertEqual(sync.sync_now.call_count, 1)
+        self.app.edit_session(self.saved()[0]["id"])
+        e.paid_var.set("10")
+        e.update()
+        self.assertEqual(sync.sync_now.call_count, 2)
+        e.paid_var.set("abc")
+        e.update()  # rejected by validation: nothing new to upload
+        self.assertEqual(sync.sync_now.call_count, 2)
+
     def test_extension_cancel_then_commit_updates_price(self):
         e = self.e
         self.fill(start="18:00", end="19:00")

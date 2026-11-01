@@ -1,7 +1,7 @@
 """Upload new and changed sessions and passes to the online dashboard (cafe-web Worker).
 
 Threading: Tkinter is not thread-safe, so ``SyncController`` runs on the Tk thread. Every
-``interval_seconds`` (and on "Sync Now") it copies the records into plain dicts and hands them
+``interval_seconds``, after every saved entry or edit, and on "Sync Now" it copies the records into plain dicts and hands them
 to a background ``SyncWorker`` thread, which hashes them, talks HTTPS to the Worker, retries and
 saves ``sync_state.json``. Results come back through a queue the Tk thread polls with
 ``after``, so the window never waits on the network. The worker never touches
@@ -576,7 +576,7 @@ class SyncController:
             lines.append(f"{r.skipped_older} record(s) were skipped because the server has a newer version.")
         if r is not None and r.invalid:
             lines.append("Rejected by the server:\n" + "\n".join(f"• {x}" for x in r.invalid[:5]))
-        lines.append(f"Uploads run at startup and every {self.config.interval_seconds // 60} minutes.")
+        lines.append(f"Uploads run at startup, after every save and every {self.config.interval_seconds // 60} minutes.")
         return "\n".join(lines)
 
     def _report(self) -> None:

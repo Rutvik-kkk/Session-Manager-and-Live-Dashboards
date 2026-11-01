@@ -486,8 +486,8 @@ class DashboardTab(ttk.Frame):
         rows = self._busy_rows()
         start, end = preset_range(self.busy_period_var.get(), today_local())
         n = len(rows)
-        self.busy_note.configure(text=f"{fmt_date(start)} – {fmt_date(end)} · {n} session{'s' if n != 1 else ''} · "
-                                      "other filters still apply")
+        span = f"{fmt_date(start)} – {fmt_date(end)}" if start else "All dates"
+        self.busy_note.configure(text=f"{span} · {n} session{'s' if n != 1 else ''} · other filters still apply")
         self._render_chart("busy", lambda ax: self._draw_busy(ax, rows), has_data=bool(rows))
 
     def _render_chart(self, key: str, draw: Callable, has_data: bool | None = None):

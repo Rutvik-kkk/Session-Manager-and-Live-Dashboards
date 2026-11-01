@@ -73,7 +73,7 @@ class OnTopApp:
         self.set_status(f"{len(store.sessions)} session(s) loaded from {store.path}")
 
         self.entry._show_mode_buttons()
-        self.data_changed()
+        self.refresh_views()
         self._tick_clock()
         root.bind("<Destroy>", self._on_destroy, add="+")
         if store.load_error:
@@ -255,13 +255,19 @@ class OnTopApp:
         self.notebook.select(self.entry_area)
         self.entry_tabs.select(page)
 
-    def data_changed(self):
-        """Refresh every view after a successful write, keeping their filters."""
+    def refresh_views(self):
+        """Redraw every view from the store, keeping their filters."""
         self.entries.refresh()
         self.passes.refresh()
         self.entry.refresh_pass()
         self.mapping.refresh()
         self.dashboard.refresh()
+
+    def data_changed(self):
+        """Called after every successful save: refresh the views and upload the change right away."""
+        self.refresh_views()
+        if self.sync is not None and self.sync.enabled:
+            self.sync.sync_now()
 
     def edit_session(self, session_id: str):
         if self.entry.load_session(session_id):

@@ -10,6 +10,7 @@ sessions.*.json
 sync_state.json
 # Online sync credentials (copy sync_config.example.json to create it).
 sync_config.json
+.wrangler/
 # Website secrets and local Wrangler/D1 state (see cafe-web/.gitignore).
 cafe-web/.dev.vars
 cafe-web/.wrangler/

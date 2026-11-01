@@ -29,13 +29,16 @@
     </div>
 
     <form id="filters" class="filters card" autocomplete="off">
-      <label>Period
+      <label>Date range
         <select name="period">
           <option value="today">Today</option>
           <option value="yesterday">Yesterday</option>
           <option value="7d" selected>Last 7 days</option>
-          <option value="30d">Last 30 days</option>
+          <option value="week">This week</option>
           <option value="month">This month</option>
+          <option value="year">This year</option>
+          <option value="all">All time</option>
+          <option value="30d">Last 30 days</option>
           <option value="last-month">Last month</option>
           <option value="custom">Custom dates</option>
         </select>
@@ -46,23 +49,79 @@
       <label>Payment method <select name="method"><option value="">All methods</option></select></label>
       <label>Payment status <select name="status"><option value="">All statuses</option></select></label>
       <label>Customer <input type="search" name="q" placeholder="Search by name" maxlength="80"></label>
+      <label>Group by
+        <select name="group">
+          <option value="day">Day</option>
+          <option value="week">Week</option>
+          <option value="month">Month</option>
+        </select>
+      </label>
       <button type="button" id="reset-filters" class="ghost">Reset</button>
+      <p class="muted small note">Dates use each session's start date (IST), including both the From and To days.
+        Weeks start on Monday.</p>
     </form>
 
     <p id="page-error" class="banner error" role="alert" hidden></p>
 
+    <p id="range-label" class="muted small range-label"></p>
     <section class="stats" id="stats" aria-label="Totals"></section>
 
     <section class="charts">
-      <div class="card chart wide">
-        <h2>Daily earnings</h2>
-        <div class="legend"><span><i class="swatch"></i>Charged</span><span><i class="swatch alt"></i>Collected</span></div>
-        <div id="chart-daily"></div>
+      <div class="card chart">
+        <h2>Earnings <span class="muted small">Money received: session payments + monthly pass sales</span></h2>
+        <div class="legend" id="earnings-legend"></div>
+        <div id="chart-earnings" class="plot"></div>
       </div>
-      <div class="card chart"><h2>Busy hours <span class="muted small">(sessions started)</span></h2><div id="chart-hours"></div></div>
-      <div class="card"><h2>Earnings by device</h2><div id="chart-devices" class="hbars"></div></div>
-      <div class="card"><h2>Collected by payment method</h2><div id="chart-methods" class="hbars"></div></div>
-      <div class="card"><h2>Payment status</h2><div id="chart-status" class="hbars"></div></div>
+      <div class="card chart">
+        <h2>Session activity <span class="muted small">Number of sessions</span></h2>
+        <div id="chart-activity" class="plot"></div>
+      </div>
+      <div class="card chart">
+        <h2>Device comparison</h2>
+        <div class="chart-controls">
+          <label>Show
+            <select id="dev-metric">
+              <option value="count">Session count</option>
+              <option value="hours">Booked hours</option>
+              <option value="charges">Total charges</option>
+            </select>
+          </label>
+          <label>Sort by
+            <select id="dev-sort">
+              <option value="name">Device name</option>
+              <option value="count">Session count</option>
+              <option value="hours">Booked hours</option>
+              <option value="charges">Total charges</option>
+            </select>
+          </label>
+          <label>Order
+            <select id="dev-order">
+              <option value="asc">Ascending</option>
+              <option value="desc">Descending</option>
+            </select>
+          </label>
+        </div>
+        <div id="chart-devices" class="plot"></div>
+      </div>
+      <div class="card chart">
+        <h2>Payment methods <span class="muted small">Amount received, by each session's saved method</span></h2>
+        <div id="chart-methods" class="plot"></div>
+      </div>
+      <div class="card chart">
+        <h2>Busy hours <span class="muted small">Sessions playing during each hour (IST)</span></h2>
+        <div class="chart-controls">
+          <label>Period
+            <select id="busy-period">
+              <option value="week">This week</option>
+              <option value="month">This month</option>
+              <option value="year">This year</option>
+              <option value="all">All time</option>
+            </select>
+          </label>
+          <span id="busy-note" class="muted small"></span>
+        </div>
+        <div id="chart-busy" class="plot"></div>
+      </div>
     </section>
 
     <section class="card">

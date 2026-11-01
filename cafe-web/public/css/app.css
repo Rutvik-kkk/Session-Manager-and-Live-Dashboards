@@ -116,16 +116,37 @@ main { padding: 18px 24px 40px; max-width: 1500px; margin: 0 auto; }
 .charts { display: grid; grid-template-columns: repeat(auto-fit, minmax(420px, 1fr)); gap: 12px; margin-bottom: 16px; }
 .charts .wide { grid-column: 1 / -1; }
 
+.chart h2 .muted { font-weight: 400; margin-left: 6px; }
 .chart svg { max-width: 100%; height: auto; display: block; }
+.chart .plot { min-height: 250px; }
 .chart .grid line { stroke: var(--surface-2); }
 .chart .axis text { fill: var(--muted); font-size: 11px; }
+.chart text.value { fill: var(--text); font-size: 11px; }
 .chart rect.bar { fill: var(--accent); }
 .chart rect.bar.alt { fill: var(--info); }
+.chart rect.bar.good { fill: var(--success); }
+.chart rect.bar.peak { fill: var(--warning); }
+.chart rect.bar.dev0 { fill: #8ebbff; }
+.chart rect.bar.dev1 { fill: #c084fc; }
+.chart rect.bar.dev2 { fill: #f9b17a; }
+.chart rect.bar.dev3 { fill: #5eead4; }
 .chart rect.bar:hover { filter: brightness(1.15); }
+.chart .line { fill: none; stroke: var(--info); stroke-width: 2; }
+.chart .line.good { stroke: var(--success); }
+.chart .area { fill: var(--info); opacity: .12; stroke: none; }
+.chart .area.good { fill: var(--success); }
+.chart circle.dot { fill: var(--info); }
+.chart circle.dot.good { fill: var(--success); }
 .chart .empty { color: var(--muted); padding: 30px 0; text-align: center; }
+.chart-controls { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: flex-end; margin: -4px 0 10px; }
+.chart-controls label { display: flex; flex-direction: column; gap: 3px; font-size: .78rem; color: var(--muted); }
+.chart-controls select { padding: 5px 10px; font-size: .88rem; }
 .legend { display: flex; gap: 14px; font-size: .82rem; color: var(--muted); margin: -6px 0 8px; }
 .legend .swatch { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 5px; background: var(--accent); }
 .legend .swatch.alt { background: var(--info); }
+.legend .swatch.good { background: var(--success); }
+.filters .note { flex-basis: 100%; margin: 0; }
+.range-label { margin: -6px 0 10px; }
 
 .hbars { display: grid; gap: 9px; }
 .hbar { display: grid; grid-template-columns: 110px 1fr auto; align-items: center; gap: 10px; font-size: .9rem; }
@@ -160,11 +181,16 @@ tbody tr:hover { background: var(--surface-2); }
 
 /* ---------- session mapping ---------- */
 .day-nav { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
-.timeline { position: relative; margin-top: 8px; }
-.timeline .hours { display: grid; margin-left: 110px; color: var(--muted); font-size: .78rem; }
-.timeline .hours span { border-left: 1px solid var(--surface-2); padding-left: 4px; }
-.lane { display: grid; grid-template-columns: 110px 1fr; align-items: stretch; margin-top: 8px; }
-.lane .name { font-weight: 600; padding-top: 14px; }
+/* On narrow (portrait) screens the timeline keeps a readable width per hour and scrolls sideways;
+   the device names stay pinned on the left. */
+.timeline { position: relative; margin-top: 8px; overflow-x: auto; overscroll-behavior-x: contain; --name-w: 110px; --hour-w: 0px; }
+.timeline .inner { min-width: calc(var(--name-w) + var(--hours) * var(--hour-w)); padding-bottom: 6px; }
+.timeline .hours-row { display: flex; }
+.timeline .corner { flex: none; width: var(--name-w); position: sticky; left: 0; z-index: 2; background: var(--surface); }
+.timeline .hours { flex: 1; display: grid; color: var(--muted); font-size: .78rem; }
+.timeline .hours span { border-left: 1px solid var(--surface-2); padding-left: 4px; white-space: nowrap; }
+.lane { display: grid; grid-template-columns: var(--name-w) 1fr; align-items: stretch; margin-top: 8px; }
+.lane .name { font-weight: 600; padding-top: 14px; position: sticky; left: 0; z-index: 2; background: var(--surface); }
 .lane .track { position: relative; height: 56px; background: var(--surface-2); border-radius: 10px; overflow: hidden; }
 .block {
   position: absolute;
@@ -198,8 +224,16 @@ tbody tr:hover { background: var(--surface-2); }
 .login-card label { display: grid; gap: 4px; font-size: .88rem; color: var(--muted); }
 .login-card button { margin-top: 4px; padding: 10px; }
 
+@media (max-width: 900px) {
+  .timeline { --hour-w: 84px; }
+}
+
 @media (max-width: 700px) {
   .charts { grid-template-columns: 1fr; }
   .topbar .sync { margin-left: 0; width: 100%; }
   .hbar { grid-template-columns: 80px 1fr auto; }
+  main { padding: 14px 12px 32px; }
+  .card { padding: 14px 12px; }
+  .timeline { --name-w: 72px; }
+  .lane .name { font-size: .88rem; }
 }
