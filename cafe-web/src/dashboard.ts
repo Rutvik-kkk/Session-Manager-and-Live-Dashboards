@@ -12,6 +12,8 @@ import {
 } from "./util";
 
 const MAX_PAGE_SIZE = 100;
+// Most games / snack lines sent for the ranked charts; the page shows the top ten of them.
+const MAX_RANKED = 100;
 const PAYMENT_METHODS = ["Cash", "UPI", "Card", "Other"];
 const PAYMENT_STATUSES = ["Paid", "Unpaid", "Partially Paid"];
 const BUSY_PERIODS = ["week", "month", "year", "all"] as const;
@@ -115,7 +117,15 @@ export async function handleDashboard(url: URL, env: AppEnv): Promise<Response> 
   }
   if (f.q) passParts.push("0");
 
-  const [summary, daily, byDevice, byMethod, busy, passDaily, settingsRow] = await env.DB.batch<
+  // Expenses are not tied to a customer or console: only the date range applies (as on the desktop).
+  const expenseParts = ["1 = 1"];
+  const expenseParams: string[] = [];
+  if (f.from !== null && f.to !== null) {
+    expenseParts.push("spent_on BETWEEN ? AND ?");
+    expenseParams.push(f.from, f.to);
+  }
+
+  const [summary, daily, byDevice, byMethod, busy, passDaily, settingsRow, games, items, expenses] = await env.DB.batch<
     Record<string, unknown>
   >([
     q(`SELECT COUNT(*) AS sessions, COALESCE(SUM(total_paise), 0) AS revenue_paise,
@@ -123,7 +133,9 @@ export async function handleDashboard(url: URL, env: AppEnv): Promise<Response> 
               COUNT(DISTINCT lower(trim(customer_name))) AS customers,
               COALESCE(SUM(pass_id IS NOT NULL), 0) AS pass_sessions,
               COALESCE(SUM(CASE WHEN pass_id IS NOT NULL THEN (duration_minutes + 29) / 30 * 30 END), 0) AS pass_minutes,
-              COALESCE(SUM(total_paise > paid_paise), 0) AS sessions_with_balance
+              COALESCE(SUM(total_paise > paid_paise), 0) AS sessions_with_balance,
+              COALESCE(SUM(items_paise), 0) AS items_paise, COALESCE(SUM(items_units), 0) AS items_units,
+              COALESCE(SUM(game IS NOT NULL), 0) AS game_sessions
          FROM cafe_sessions WHERE ${w.sql}`),
     q(`SELECT start_date AS date, COUNT(*) AS sessions, SUM(total_paise) AS revenue_paise,
               SUM(paid_paise) AS collected_paise
@@ -143,6 +155,21 @@ export async function handleDashboard(url: URL, env: AppEnv): Promise<Response> 
          FROM cafe_passes WHERE ${passParts.join(" AND ")} GROUP BY purchased_on ORDER BY purchased_on`,
     ).bind(...passParams),
     env.DB.prepare(`SELECT value FROM meta WHERE key = 'cafe_settings'`),
+    // Games played (names that differ only in capitalisation count as one game).
+    q(`SELECT MIN(game) AS name, COUNT(*) AS sessions, SUM(duration_minutes) AS minutes
+         FROM cafe_sessions WHERE ${w.sql} AND game IS NOT NULL
+        GROUP BY lower(game) ORDER BY sessions DESC, name LIMIT ${MAX_RANKED}`),
+    // Snacks & drinks: one row per item name and kind, read out of each session's item list.
+    q(`SELECT MIN(json_extract(j.value, '$.name')) AS name, json_extract(j.value, '$.kind') AS kind,
+              SUM(json_extract(j.value, '$.quantity')) AS units,
+              SUM(json_extract(j.value, '$.quantity') * json_extract(j.value, '$.unit_paise')) AS sales_paise
+         FROM cafe_sessions AS s, json_each(s.items_json) AS j WHERE ${w.sql}
+        GROUP BY lower(json_extract(j.value, '$.name')), json_extract(j.value, '$.kind')
+        ORDER BY sales_paise DESC, name LIMIT ${MAX_RANKED}`),
+    env.DB.prepare(
+      `SELECT COUNT(*) AS count, COALESCE(SUM(amount_paise), 0) AS total_paise
+         FROM cafe_expenses WHERE ${expenseParts.join(" AND ")}`,
+    ).bind(...expenseParams),
   ]);
 
   // Sessions playing during each hour of the day: 10:30–12:00 counts for 10:00 and 11:00.
@@ -169,7 +196,11 @@ export async function handleDashboard(url: URL, env: AppEnv): Promise<Response> 
       outstanding_paise: s.revenue_paise - s.collected_paise,
       pass_sales: passRows.reduce((a, r) => a + r.count, 0),
       pass_revenue_paise: passRows.reduce((a, r) => a + r.revenue_paise, 0),
+      expense_count: (expenses.results[0] as { count: number }).count,
+      expense_paise: (expenses.results[0] as { total_paise: number }).total_paise,
     },
+    games: games.results,
+    items: items.results,
     daily: daily.results,
     pass_daily: passRows,
     by_device: byDevice.results,
@@ -191,12 +222,31 @@ const SORTS: Record<string, string> = {
   balance: "(total_paise - paid_paise)",
   method: "payment_method",
   status: "payment_status",
+  game: "game COLLATE NOCASE",
+  items: "items_paise",
   updated: "updated_ms",
 };
 
 const ROW_COLUMNS = `id, customer_name, device, players, pass_id IS NOT NULL AS on_pass, start_ms, end_ms,
   duration_minutes, payment_method, total_paise, paid_paise, total_paise - paid_paise AS balance_paise,
-  payment_status, extension_minutes, updated_ms`;
+  payment_status, extension_minutes, updated_ms, game, items_json`;
+
+interface SessionRow extends Record<string, unknown> {
+  items_json?: string;
+}
+
+/** Replace the stored item list with a parsed `items` array (never send the raw JSON text). */
+function withItems(rows: SessionRow[]): Record<string, unknown>[] {
+  return rows.map(({ items_json, ...rest }) => {
+    let items: unknown = [];
+    try {
+      items = JSON.parse(items_json ?? "[]");
+    } catch {
+      /* a damaged row just shows no items */
+    }
+    return { ...rest, items: Array.isArray(items) ? items : [] };
+  });
+}
 
 export async function handleSessions(url: URL, env: AppEnv): Promise<Response> {
   const f = parseFilters(url);
@@ -213,7 +263,7 @@ export async function handleSessions(url: URL, env: AppEnv): Promise<Response> {
     ).bind(...w.params, pageSize, (page - 1) * pageSize),
   ]);
   return json({
-    rows: rows.results,
+    rows: withItems(rows.results as SessionRow[]),
     total: (count.results[0] as { total: number }).total,
     page,
     page_size: pageSize,
@@ -251,7 +301,7 @@ export async function handleMapping(url: URL, env: AppEnv): Promise<Response> {
     opening: settings.opening ?? "09:00",
     closing: settings.closing ?? "22:00",
     devices,
-    sessions: rows.results,
+    sessions: withItems(rows.results as SessionRow[]),
   });
 }
 
@@ -271,5 +321,51 @@ export async function handleStatus(env: AppEnv): Promise<Response> {
     sync_interval_seconds: SYNC_INTERVAL_SECONDS,
     stale_after_seconds: STALE_AFTER_SECONDS,
     stale: last === null || !Number.isFinite(last) || now - last > STALE_AFTER_SECONDS,
+  });
+}
+
+const EXPENSE_SORTS: Record<string, string> = {
+  date: "created_ms",
+  amount: "amount_paise",
+  note: "note COLLATE NOCASE",
+};
+
+/** Employee expenses for a date range (or all time), with a note search. Read-only. */
+export async function handleExpenses(url: URL, env: AppEnv): Promise<Response> {
+  const f = parseFilters(url);
+  const parts = ["1 = 1"];
+  const params: (string | number)[] = [];
+  if (f.from !== null && f.to !== null) {
+    parts.push("spent_on BETWEEN ? AND ?");
+    params.push(f.from, f.to);
+  }
+  if (f.q) {
+    parts.push("note LIKE ? ESCAPE '\\'");
+    params.push(`%${f.q.replace(/[\\%_]/g, (c) => `\\${c}`)}%`);
+  }
+  const where = parts.join(" AND ");
+  const sort = EXPENSE_SORTS[url.searchParams.get("sort") ?? "date"] ? (url.searchParams.get("sort") ?? "date") : "date";
+  const dir = url.searchParams.get("dir") === "asc" ? "ASC" : "DESC";
+  const pageSize = Math.min(Math.max(Number(url.searchParams.get("page_size")) || 25, 5), MAX_PAGE_SIZE);
+  const page = Math.max(Math.floor(Number(url.searchParams.get("page")) || 1), 1);
+  const [totals, rows] = await env.DB.batch<Record<string, unknown>>([
+    env.DB.prepare(
+      `SELECT COUNT(*) AS total, COALESCE(SUM(amount_paise), 0) AS total_paise FROM cafe_expenses WHERE ${where}`,
+    ).bind(...params),
+    env.DB.prepare(
+      `SELECT id, amount_paise, note, spent_on, created_ms, updated_ms FROM cafe_expenses WHERE ${where}
+        ORDER BY ${EXPENSE_SORTS[sort]} ${dir}, created_ms ${dir}, id LIMIT ? OFFSET ?`,
+    ).bind(...params, pageSize, (page - 1) * pageSize),
+  ]);
+  const t = totals.results[0] as { total: number; total_paise: number };
+  return json({
+    filters: { from: f.from, to: f.to, q: f.q },
+    rows: rows.results,
+    total: t.total,
+    total_paise: t.total_paise,
+    page,
+    page_size: pageSize,
+    sort,
+    dir: dir.toLowerCase(),
   });
 }

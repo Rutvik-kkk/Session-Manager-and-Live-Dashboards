@@ -7,6 +7,7 @@ const form = document.getElementById("filters");
 const DEFAULTS = {
   period: "today", from: "", to: "", device: "", method: "", status: "", q: "", group: "day",
   dev_metric: "count", dev_sort: "name", dev_order: "asc", busy: "month",
+  snack_kind: "all", snack_metric: "sales", game_metric: "count",
   sort: "start", dir: "desc", page: 1, page_size: 25,
 };
 const state = { ...DEFAULTS };
@@ -75,6 +76,9 @@ function syncForm() {
   document.getElementById("dev-sort").value = state.dev_sort;
   document.getElementById("dev-order").value = state.dev_order;
   document.getElementById("busy-period").value = state.busy;
+  document.getElementById("snack-kind").value = state.snack_kind;
+  document.getElementById("snack-metric").value = state.snack_metric;
+  document.getElementById("game-metric").value = state.game_metric;
 }
 
 function fillOptions(select, values, allLabel) {
@@ -118,6 +122,17 @@ for (const [id, key] of [["dev-metric", "dev_metric"], ["dev-sort", "dev_sort"],
     if (lastDashboard) renderDevices(lastDashboard);
   });
 }
+for (const [id, key, render] of [
+  ["snack-kind", "snack_kind", () => renderSnacks(lastDashboard)],
+  ["snack-metric", "snack_metric", () => renderSnacks(lastDashboard)],
+  ["game-metric", "game_metric", () => renderGames(lastDashboard)],
+]) {
+  document.getElementById(id).addEventListener("change", (event) => {
+    state[key] = event.target.value;
+    writeUrl();
+    if (lastDashboard) render();
+  });
+}
 document.getElementById("busy-period").addEventListener("change", (event) => {
   state.busy = event.target.value;
   writeUrl();
@@ -143,7 +158,8 @@ function stat(label, value, sub, tone, tip) {
 const plural = (n, word, many = `${word}s`) => `${n} ${n === 1 ? word : many}`;
 const fmtHours = (minutes) => `${(minutes / 60).toLocaleString("en-IN", { maximumFractionDigits: 1 })} h`;
 
-function renderStats(s) {
+function renderStats(s, games = []) {
+  const topGame = games[0]; // the server sends games most-played first
   const pct = s.revenue_paise ? `${Math.round((100 * s.collected_paise) / s.revenue_paise)}% of charges` : "no charges";
   document.getElementById("stats").replaceChildren(
     stat("Total sessions", String(s.sessions), "sessions in range"),
@@ -163,6 +179,16 @@ function renderStats(s) {
       "device and payment-status filters do not. A customer search hides passes, because holder names stay on the café PC."),
     stat("Pass hours used", fmtHours(s.pass_minutes), `${plural(s.pass_sessions, "pass session")}`, "",
       "Time deducted from monthly passes by the selected sessions (billed in 30-minute blocks)."),
+    stat("Snacks & drinks sales", fmtMoney(s.items_paise),
+      `${plural(s.items_units, "item")} sold · ${fmtMoney(Math.max(0, s.revenue_paise - s.items_paise))} playing time`, "",
+      "Snacks and drinks sold with the selected sessions, at the prices they were sold for. " +
+      "This money is already part of Total session charges."),
+    stat("Games played", String(s.game_sessions),
+      topGame ? `top: ${topGame.name} (${topGame.sessions})` : "no game recorded", "",
+      "Selected sessions that name a game. The game is optional, so sessions without one are not counted here."),
+    stat("Employee expenses", fmtMoney(s.expense_paise), `${plural(s.expense_count, "expense")} in range`, s.expense_paise > 0 ? "warn" : "",
+      "Money employees recorded as spent in the Expenses tab, by the day it was entered. Only the date range " +
+      "applies; the device, payment and customer filters do not. Not subtracted from any other figure."),
   );
 }
 
@@ -306,6 +332,38 @@ function chart(container, labels, series, { format, valueLabels = false, line = 
   container.replaceChildren(root);
 }
 
+/**
+ * Ranked horizontal bars (best first) for the games and snacks & drinks charts. Names sit on the left
+ * and are shortened to fit; hovering a bar or name shows the full text.
+ * rows: [{ name, value, className, tip }]
+ */
+function ranked(container, rows, { format, emptyText }) {
+  if (!rows.length) {
+    container.replaceChildren(el("div", { class: "empty", text: emptyText }));
+    return;
+  }
+  const W = Math.max(280, Math.round(container.clientWidth || 600));
+  const rowH = 28, pad = 6, valueW = 74;
+  const nameW = Math.min(180, Math.max(90, Math.round(W * 0.36)));
+  const barMax = Math.max(40, W - nameW - valueW - 8);
+  const max = Math.max(...rows.map((r) => r.value));
+  const maxChars = Math.max(6, Math.floor((nameW - 10) / 6.6));
+  const H = pad * 2 + rows.length * rowH;
+  const root = svg("svg", { viewBox: `0 0 ${W} ${H}`, width: W, height: H, role: "img" });
+  rows.forEach((r, i) => {
+    const top = pad + i * rowH;
+    const mid = top + rowH / 2;
+    const label = text({ class: "rank-name", x: nameW - 8, y: mid + 4, "text-anchor": "end" },
+      r.name.length > maxChars ? `${r.name.slice(0, maxChars - 1)}…` : r.name);
+    label.append(svg("title", {}, r.tip || r.name));
+    const width = Math.max(3, (barMax * r.value) / max);
+    const bar = svg("rect", { class: `bar ${r.className || ""}`, x: nameW, y: top + 5, width, height: rowH - 10, rx: 3 });
+    bar.append(svg("title", {}, r.tip || `${r.name}: ${format(r.value)}`));
+    root.append(label, bar, text({ class: "value", x: nameW + width + 6, y: mid + 4 }, format(r.value)));
+  });
+  container.replaceChildren(root);
+}
+
 const compactMoney = (paise) => {
   const rupees = paise / 100;
   if (rupees >= 100000) return `₹${(rupees / 100000).toFixed(rupees >= 1000000 ? 0 : 1)}L`;
@@ -344,6 +402,48 @@ function renderDevices(data) {
     { format, valueLabels: true, integer: state.dev_metric === "count", barClasses: rows.map((r) => r.cls) });
 }
 
+const TOP_N = 10;
+
+function renderSnacks(data) {
+  const sales = state.snack_metric === "sales";
+  const lines = data.items.filter((i) => state.snack_kind === "all" || i.kind === state.snack_kind);
+  // The same name sold as both a Snack and a Drink stays two bars in the combined view.
+  const rows = lines
+    .map((i) => ({
+      name: i.name,
+      value: sales ? i.sales_paise : i.units,
+      className: i.kind === "Drink" ? "drink" : "snack",
+      tip: `${i.name} (${i.kind}) · ${plural(i.units, "unit")} · ${fmtMoney(i.sales_paise)}`,
+    }))
+    .filter((r) => r.value > 0)
+    .sort((a, b) => b.value - a.value || a.name.localeCompare(b.name, "en", { sensitivity: "base" }))
+    .slice(0, TOP_N);
+  const swatch = (cls, label) => el("span", {}, el("i", { class: `swatch ${cls}` }), label);
+  document.getElementById("snack-legend").replaceChildren(
+    ...(state.snack_kind === "all" ? [swatch("snack", "Snacks"), swatch("drink", "Drinks")] : []));
+  ranked(document.getElementById("chart-snacks"), rows, {
+    format: sales ? compactMoney : (v) => `${v} sold`,
+    emptyText: "No snacks or drinks sold",
+  });
+}
+
+function renderGames(data) {
+  const hours = state.game_metric === "hours";
+  const rows = data.games
+    .map((g) => ({
+      name: g.name,
+      value: hours ? g.minutes / 60 : g.sessions,
+      tip: `${g.name} · ${plural(g.sessions, "session")} · ${fmtDuration(g.minutes)}`,
+    }))
+    .filter((r) => r.value > 0)
+    .sort((a, b) => b.value - a.value || a.name.localeCompare(b.name, "en", { sensitivity: "base" }))
+    .slice(0, TOP_N);
+  ranked(document.getElementById("chart-games"), rows, {
+    format: hours ? (v) => `${v.toFixed(1)} h` : (v) => `${v} ${v === 1 ? "session" : "sessions"}`,
+    emptyText: "No games recorded",
+  });
+}
+
 function renderCharts(data) {
   lastDashboard = data;
   const series = buckets(data);
@@ -361,6 +461,8 @@ function renderCharts(data) {
     { format: count, line: long, integer: true });
 
   renderDevices(data);
+  renderSnacks(data);
+  renderGames(data);
 
   const received = new Map(data.by_method.map((m) => [m.method, m.collected_paise]));
   const methods = [...new Set([...PAYMENT_METHODS, ...received.keys()])];
@@ -401,7 +503,7 @@ for (const th of table.querySelectorAll("th[data-sort]")) {
   th.replaceChildren(button);
   button.addEventListener("click", () => {
     const key = th.dataset.sort;
-    const dir = state.sort === key ? (state.dir === "asc" ? "desc" : "asc") : (key === "customer" || key === "device" || key === "method" || key === "status" ? "asc" : "desc");
+    const dir = state.sort === key ? (state.dir === "asc" ? "desc" : "asc") : (key === "customer" || key === "device" || key === "game" || key === "method" || key === "status" ? "asc" : "desc");
     applyChange({ sort: key, dir });
   });
 }
@@ -409,21 +511,31 @@ document.getElementById("prev-page").addEventListener("click", () => applyChange
 document.getElementById("next-page").addEventListener("click", () => applyChange({ page: state.page + 1 }));
 document.getElementById("page-size").addEventListener("change", (e) => applyChange({ page_size: Number(e.target.value) }));
 
+/** "2× Chips, Coke" with the full list on hover; "—" when nothing was sold. */
+function itemsCell(items) {
+  if (!items?.length) return el("td", { class: "clip", text: "—" });
+  const summary = items.map((i) => `${i.quantity}× ${i.name}`).join(", ");
+  const total = items.reduce((a, i) => a + i.quantity * i.unit_paise, 0);
+  return el("td", { class: "clip", title: `${items.map((i) => `${i.quantity}× ${i.name} (${i.kind}) · ${fmtMoney(i.quantity * i.unit_paise)}`).join("\n")}\nTotal ${fmtMoney(total)}`, text: summary });
+}
+
 function renderTable(data) {
   for (const th of table.querySelectorAll("th[data-sort]")) {
     th.setAttribute("aria-sort", th.dataset.sort === data.sort ? (data.dir === "asc" ? "ascending" : "descending") : "none");
   }
   const body = table.tBodies[0];
   if (!data.rows.length) {
-    body.replaceChildren(el("tr", {}, el("td", { colspan: "10", class: "muted", text: "No sessions match these filters." })));
+    body.replaceChildren(el("tr", {}, el("td", { colspan: "12", class: "muted", text: "No sessions match these filters." })));
   } else {
     body.replaceChildren(...data.rows.map((r) => el("tr", {},
       el("td", { text: fmtDateTime(r.start_ms) }),
       el("td", {}, r.customer_name, r.on_pass ? el("span", { class: "badge", text: "Pass" }) : null,
         r.extension_minutes ? el("span", { class: "badge", text: `+${fmtDuration(r.extension_minutes)}` }) : null),
       el("td", { text: r.device }),
+      el("td", { class: "clip", title: r.game || undefined, text: r.game || "—" }),
       el("td", { class: "num", text: String(r.players) }),
       el("td", { class: "num", text: fmtDuration(r.duration_minutes) }),
+      itemsCell(r.items),
       el("td", { class: "num", text: fmtMoney(r.total_paise) }),
       el("td", { class: "num", text: fmtMoney(r.paid_paise) }),
       el("td", { class: "num", text: r.balance_paise ? fmtMoney(r.balance_paise) : "—" }),
@@ -456,7 +568,7 @@ async function load() {
   fillOptions(form.method, dash.options.method, "All methods");
   fillOptions(form.status, dash.options.status, "All statuses");
   renderRangeLabel(dash);
-  renderStats(dash.summary);
+  renderStats(dash.summary, dash.games);
   renderCharts(dash);
   renderTable(history);
 }

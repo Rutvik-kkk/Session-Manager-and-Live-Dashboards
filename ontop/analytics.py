@@ -11,11 +11,12 @@ from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
 from typing import Iterable, Sequence
 
-from .config import CLOSING_TIME, OPENING_TIME
+from .config import CLOSING_TIME, ITEM_KINDS, OPENING_TIME
 from .formatting import local_datetime
 from .models import (
     DEVICES,
     PAYMENT_METHODS,
+    Expense,
     MonthlyPass,
     Session,
     customer_key,
@@ -116,6 +117,13 @@ class Summary:
     balance_paise: int
     pass_sessions: int = 0
     pass_minutes: int = 0
+    items_paise: int = 0  # snacks & drinks sold (already part of total_paise)
+    items_units: int = 0
+
+    @property
+    def playing_paise(self) -> int:
+        """Charges for playing time only (total charges minus snacks and drinks)."""
+        return self.total_paise - self.items_paise
 
     @property
     def average_minutes(self) -> float:
@@ -137,6 +145,8 @@ def summarize(sessions: Sequence[Session]) -> Summary:
         balance_paise=sum(s.balance_paise for s in sessions),
         pass_sessions=sum(1 for s in sessions if s.pass_id),
         pass_minutes=sum(s.pass_minutes for s in sessions),
+        items_paise=sum(s.items_paise for s in sessions),
+        items_units=sum(i.quantity for s in sessions for i in s.items),
     )
 
 
@@ -296,6 +306,88 @@ def received_by_method(sessions: Sequence[Session]) -> dict[str, int]:
     for s in sessions:
         out[s.payment_method] = out.get(s.payment_method, 0) + s.paid_paise
     return out
+
+
+@dataclass(frozen=True)
+class GameStats:
+    game: str
+    count: int
+    minutes: int
+
+    def metric(self, metric: str) -> float:
+        return self.minutes / 60 if metric == METRIC_HOURS else self.count
+
+
+def game_stats(sessions: Sequence[Session], metric: str = METRIC_COUNT) -> list[GameStats]:
+    """Games played (sessions that name a game), most played first; ties in A–Z order."""
+    counts: Counter = Counter()
+    minutes: Counter = Counter()
+    names: dict[str, str] = {}
+    for s in sessions:
+        if not s.game:
+            continue
+        key = s.game.casefold()
+        names.setdefault(key, s.game)
+        counts[key] += 1
+        minutes[key] += s.duration_minutes
+    rows = [GameStats(names[k], counts[k], minutes[k]) for k in counts]
+    rows.sort(key=lambda g: g.game.casefold())
+    return sorted(rows, key=lambda g: g.metric(metric), reverse=True)
+
+
+ITEM_METRIC_SALES = "Sales (₹)"
+ITEM_METRIC_UNITS = "Units Sold"
+ITEM_METRICS = (ITEM_METRIC_SALES, ITEM_METRIC_UNITS)
+ITEM_KIND_ALL = "Snacks & Drinks"
+
+
+@dataclass(frozen=True)
+class ItemSales:
+    name: str
+    kind: str
+    units: int
+    sales_paise: int
+
+    def metric(self, metric: str) -> float:
+        return self.units if metric == ITEM_METRIC_UNITS else self.sales_paise / 100
+
+
+def item_sales(sessions: Sequence[Session], kind: str | None = None,
+               metric: str = ITEM_METRIC_SALES) -> list[ItemSales]:
+    """Snacks and drinks sold, best sellers first. Lines are grouped by name and kind whatever their price was."""
+    units: Counter = Counter()
+    sales: Counter = Counter()
+    names: dict[tuple[str, str], str] = {}
+    for s in sessions:
+        for item in s.items:
+            if kind and item.kind != kind:
+                continue
+            key = (item.name.casefold(), item.kind)
+            names.setdefault(key, item.name)
+            units[key] += item.quantity
+            sales[key] += item.amount_paise
+    rows = [ItemSales(names[k], k[1], units[k], sales[k]) for k in units]
+    rows.sort(key=lambda r: (r.name.casefold(), r.kind))
+    return sorted(rows, key=lambda r: r.metric(metric), reverse=True)
+
+
+def sales_by_kind(sessions: Sequence[Session]) -> dict[str, int]:
+    out = {k: 0 for k in ITEM_KINDS}
+    for s in sessions:
+        for item in s.items:
+            out[item.kind] = out.get(item.kind, 0) + item.amount_paise
+    return out
+
+
+def expenses_in_range(expenses: Iterable[Expense], start: date | None, end: date | None,
+                      search: str = "") -> list[Expense]:
+    """Expenses entered in the inclusive date range (by the day they were entered)."""
+    needle = " ".join(search.split()).casefold()
+    return [
+        e for e in expenses
+        if (start is None or e.spent_on >= start) and (end is None or e.spent_on <= end)
+        and (not needle or needle in e.note.casefold())
+    ]
 
 
 def busy_hour_counts(sessions: Sequence[Session]) -> list[int]:

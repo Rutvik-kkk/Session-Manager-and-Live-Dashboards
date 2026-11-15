@@ -5,6 +5,8 @@ Run with:  python -m unittest discover -s tests -v
 
 from __future__ import annotations
 
+import copy
+import dataclasses
 import json
 import os
 import tempfile
@@ -17,16 +19,20 @@ from ontop import analytics as an
 from ontop.formatting import fmt_money, local_datetime, parse_money
 from ontop.models import (
     ConflictError,
+    Expense,
     Extension,
     MonthlyPass,
+    SaleItem,
     Session,
     ValidationError,
     active_pass_for_phone,
     build_times,
     find_conflicts,
+    merge_items,
     normalise_phone,
     pass_state,
     payment_problems,
+    prepare_expense,
     prepare_pass,
     prepare_session,
     suggest_status,
@@ -40,13 +46,14 @@ NOW = local_datetime(DAY, time(12, 0))
 
 def make(name="Asha", device="PS5(X)", day=DAY, start="18:00", end="19:00", players=1, total="200",
          paid="200", status=None, method="Cash", now=NOW, existing=None, extensions=(), monthly_pass=None,
-         used=0, notes=""):
+         used=0, notes="", game=None, items=()):
     total_p, paid_p = parse_money(total), parse_money(paid)
     return prepare_session(
         customer_name=name, device=device, players=players, date_text=day.isoformat(), start_text=start,
         end_text=end, payment_method=method, total_text=total, paid_text=paid,
         payment_status=status or suggest_status(total_p, paid_p), now=now, existing=existing,
         new_extensions=extensions, monthly_pass=monthly_pass, pass_used_by_others=used, notes_text=notes,
+        game=game, items=items,
     )
 
 
@@ -274,7 +281,7 @@ class PassRuleTests(unittest.TestCase):
 class StorageTests(TempStoreCase):
     def test_creates_file_and_reloads(self):
         store = self.store()
-        self.assertEqual(json.loads(self.path.read_text()), {"schema_version": 2, "sessions": [], "passes": []})
+        self.assertEqual(json.loads(self.path.read_text()), {"schema_version": 3, "sessions": [], "passes": [], "expenses": []})
         s = make(players=3, total="280", paid="100", status="Partially Paid")
         store.add(s)
         loaded = self.store().get(s.id)
@@ -366,7 +373,22 @@ class StorageTests(TempStoreCase):
         self.assertEqual(self.path.read_text(), original)
         store.add(make(name="New", start="10:00", end="11:00"))
         self.assertEqual(store.backup_path.read_text(), original)
-        self.assertEqual(json.loads(self.path.read_text())["schema_version"], 2)
+        self.assertEqual(json.loads(self.path.read_text())["schema_version"], 3)
+        self.assertEqual(store.backup_path.name, "sessions.v1-backup.json")
+
+    def test_upgrades_v2_file_with_its_own_backup(self):
+        self.dir.mkdir(parents=True)
+        original = json.dumps({"schema_version": 2, "sessions": [make().to_dict()], "passes": []})
+        self.path.write_text(original)
+        store = self.store()
+        self.assertIsNone(store.load_error)
+        self.assertEqual(store.upgraded_from, 2)
+        self.assertEqual((store.sessions[0].game, store.sessions[0].items, store.expenses), (None, [], []))
+        store.add(make(name="New", start="10:00", end="11:00"))
+        self.assertEqual(store.backup_path.name, "sessions.v2-backup.json")
+        self.assertEqual(store.backup_path.read_text(), original)
+        saved = json.loads(self.path.read_text())
+        self.assertEqual((saved["schema_version"], saved["expenses"]), (3, []))
 
     def test_corrupted_json_preserved_and_read_only(self):
         self.dir.mkdir(parents=True)
@@ -552,15 +574,28 @@ class RecordTests(unittest.TestCase):
             MonthlyPass.from_dict(bad)
 
 
+def restore_config(saved):
+    """Put config back; its price dicts are imported by name elsewhere, so refill them in place."""
+    from ontop import config
+
+    for key, value in saved.items():
+        current = getattr(config, key)
+        if isinstance(current, dict):
+            current.clear()
+            current.update(copy.deepcopy(value))
+        else:
+            setattr(config, key, value)
+
+
 class SettingsTests(TempStoreCase):
     def test_round_trip_and_apply(self):
         from ontop import config
         from ontop import settings as st
 
-        saved = {k: getattr(config, k) for k in ("OPENING_TIME", "CLOSING_TIME", "HOURLY_RATES_PAISE",
+        saved = {k: copy.deepcopy(getattr(config, k)) for k in ("OPENING_TIME", "CLOSING_TIME", "HOURLY_RATES_PAISE",
                                                  "HALF_HOUR_PRICES_PAISE", "PASS_DEFAULT_PRICE_PAISE",
                                                  "PASS_HOURS", "PASS_VALID_DAYS")}
-        self.addCleanup(lambda: [setattr(config, k, v) for k, v in saved.items()])
+        self.addCleanup(restore_config, saved)
         self.addCleanup(setattr, st.formatting, "CLOCK_24H", True)
         path = st.settings_path(self.dir)
         self.assertEqual(st.load(path), (st.AppSettings(), None))
@@ -606,6 +641,172 @@ class SettingsTests(TempStoreCase):
         self.assertEqual(theme.DEVICE_COLORS["PS5(Y)"], "#f2a7b8")
         theme.set_palette("Retired theme")
         self.assertEqual(theme.CURRENT_THEME, "Midnight")
+
+    def test_devices_games_and_menu(self):
+        from ontop import settings as st
+
+        s = st.AppSettings()
+        self.assertEqual([d["name"] for d in s.devices], ["PS5(X)", "PS5(Y)", "PS4"])
+        self.assertEqual((s.games, s.menu_items, s.problems()), ([], [], []))
+        path = st.settings_path(self.dir)
+        s.devices.append({"name": "PC", "group": "PC"})
+        s.hourly_rates_paise["PC"] = {1: 5000, 2: 9000, 3: 12000, 4: 15000}
+        s.half_hour_paise["PC"] = 3000
+        s.games = ["FIFA 25", "GTA V"]
+        s.menu_items = [{"name": "Chips", "kind": "Snack", "price_paise": 2000},
+                        {"name": "Cold Coffee", "kind": "Drink", "price_paise": 6000}]
+        st.save(path, s)
+        loaded, warning = st.load(path)
+        self.assertIsNone(warning)
+        self.assertEqual(loaded, s)
+        self.assertEqual(loaded.price_groups, ["PS5", "PS4", "PC"])
+
+        # games and the menu apply live; everything else needs a restart
+        live = dataclasses.replace(s, games=["FIFA 25"], menu_items=[])
+        self.assertFalse(s.needs_restart(live))
+        # price lists (and which list a device uses) apply live too; the set of devices does not
+        rates = {g: dict(r) for g, r in s.hourly_rates_paise.items()}
+        rates["PS4"][1] += 500
+        self.assertFalse(s.needs_restart(dataclasses.replace(s, hourly_rates_paise=rates)))
+        self.assertFalse(s.needs_restart(dataclasses.replace(s, half_hour_paise={"PS5": 1, "PS4": 2})))
+        regrouped = [dict(d) for d in s.devices]
+        regrouped[1]["group"] = "PS5(Y)"
+        self.assertFalse(s.needs_restart(dataclasses.replace(s, devices=regrouped)))
+        self.assertTrue(s.needs_restart(dataclasses.replace(s, pass_hours=10)))
+        self.assertTrue(s.needs_restart(dataclasses.replace(s, devices=s.devices[:3])))
+
+    def test_catalogue_validation(self):
+        from ontop import settings as st
+
+        base = st.AppSettings()
+        bad = {
+            "no devices": dataclasses.replace(base, devices=[]),
+            "duplicate device": dataclasses.replace(base, devices=[{"name": "PS4", "group": "PS4"},
+                                                                    {"name": "ps4", "group": "PS4"}]),
+            "group without prices": dataclasses.replace(base, devices=[{"name": "PC", "group": "PC"}]),
+            "duplicate game": dataclasses.replace(base, games=["FIFA", "fifa"]),
+            "blank game": dataclasses.replace(base, games=[" "]),
+            "bad kind": dataclasses.replace(base, menu_items=[{"name": "X", "kind": "Meal", "price_paise": 100}]),
+            "bad price": dataclasses.replace(base, menu_items=[{"name": "X", "kind": "Snack", "price_paise": -5}]),
+            "duplicate item": dataclasses.replace(base, menu_items=[{"name": "X", "kind": "Snack", "price_paise": 1},
+                                                                     {"name": "x", "kind": "Snack", "price_paise": 2}]),
+        }
+        for label, settings in bad.items():
+            self.assertTrue(settings.problems(), label)
+        # the same name as a snack and as a drink is fine
+        ok = dataclasses.replace(base, menu_items=[{"name": "Lime", "kind": "Snack", "price_paise": 1},
+                                                    {"name": "Lime", "kind": "Drink", "price_paise": 2}])
+        self.assertEqual(ok.problems(), [])
+
+    def test_apply_sets_devices(self):
+        from ontop import config
+        from ontop import settings as st
+
+        saved = {k: copy.deepcopy(getattr(config, k)) for k in ("DEVICES", "DEVICE_PRICE_GROUP", "HOURLY_RATES_PAISE",
+                                                 "HALF_HOUR_PRICES_PAISE")}
+        self.addCleanup(restore_config, saved)
+        s = st.AppSettings(devices=[{"name": "Arcade", "group": "PS4"}])
+        s.hourly_rates_paise = {"PS4": s.hourly_rates_paise["PS4"]}
+        s.half_hour_paise = {"PS4": 4000}
+        st.apply(s)
+        self.assertEqual((config.DEVICES, config.DEVICE_PRICE_GROUP), (("Arcade",), {"Arcade": "PS4"}))
+
+
+class SnacksGamesAndExpensesTests(TempStoreCase):
+    ITEMS = (SaleItem("Chips", "Snack", 2, 2000), SaleItem("Cold Coffee", "Drink", 1, 6000))
+
+    def test_session_keeps_game_and_priced_items(self):
+        s = make(game="  FIFA   25 ", items=self.ITEMS, total="300", paid="300")
+        self.assertEqual((s.game, s.items_paise), ("FIFA 25", 10000))
+        again = Session.from_dict(json.loads(json.dumps(s.to_dict())))
+        self.assertEqual((again.game, again.items), (s.game, list(self.ITEMS)))
+        self.assertEqual(Session.from_dict(make().to_dict()).game, None)
+
+        # records written before games/snacks existed still load
+        old = make().to_dict()
+        del old["game"], old["items"]
+        legacy = Session.from_dict(old)
+        self.assertEqual((legacy.game, legacy.items), (None, []))
+
+        store = self.store()
+        store.add(s)
+        saved = self.store().sessions[0]
+        self.assertEqual((saved.game, saved.items), ("FIFA 25", list(self.ITEMS)))
+
+    def test_item_validation(self):
+        for item in (SaleItem("", "Snack", 1, 100), SaleItem("X", "Meal", 1, 100), SaleItem("X", "Snack", 0, 100),
+                     SaleItem("X", "Snack", 100, 100), SaleItem("X", "Snack", 1, -1)):
+            with self.assertRaises(ValidationError, msg=item):
+                make(items=[item])
+        bad = make(items=self.ITEMS).to_dict()
+        bad["items"][0]["quantity"] = "two"
+        with self.assertRaises(ValueError):
+            Session.from_dict(bad)
+
+    def test_merge_items_keeps_prices_apart(self):
+        merged = merge_items([SaleItem("Chips", "Snack", 1, 2000), SaleItem("chips", "Snack", 2, 2000),
+                              SaleItem("Chips", "Snack", 1, 2500)])
+        self.assertEqual([(i.quantity, i.unit_paise) for i in merged], [(3, 2000), (1, 2500)])
+
+    def test_expenses_are_validated_saved_and_edited(self):
+        store = self.store()
+        for amount, note in (("", "Tape"), ("0", "Tape"), ("-5", "Tape"), ("abc", "Tape"), ("50", "  "),
+                             ("50", "x" * 201)):
+            with self.assertRaises(ValidationError, msg=(amount, note)):
+                prepare_expense(amount_text=amount, note_text=note, now=NOW)
+        e = prepare_expense(amount_text="₹1,250.50", note_text="  Controller repair \n", now=NOW)
+        self.assertEqual((e.amount_paise, e.note, e.spent_on), (125050, "Controller repair", DAY))
+        store.add_expense(e)
+        reloaded = self.store()
+        self.assertEqual([x.to_dict() for x in reloaded.expenses], [e.to_dict()])
+
+        later = NOW + timedelta(hours=3)
+        edited = prepare_expense(amount_text="1300", note_text="Controller repair + cable", now=later, existing=e)
+        self.assertEqual((edited.id, edited.created_at, edited.last_updated), (e.id, e.created_at, later))
+        reloaded.update_expense(edited)
+        self.assertEqual(self.store().get_expense(e.id).amount_paise, 130000)
+        with self.assertRaises(StorageError):
+            reloaded.update_expense(Expense("nope", 100, "x", NOW, NOW))
+        self.assertEqual(len(self.store().expenses), 1)
+
+    def test_invalid_expense_makes_file_read_only(self):
+        store = self.store()
+        store.add_expense(prepare_expense(amount_text="10", note_text="ok", now=NOW))
+        data = json.loads(self.path.read_text())
+        data["expenses"][0]["amount_paise"] = -3
+        self.path.write_text(json.dumps(data))
+        broken = self.store()
+        self.assertTrue(broken.read_only)
+        self.assertIn("Expense #1", broken.load_error)
+
+    def test_analytics_for_games_snacks_and_expenses(self):
+        a = make(name="A", game="FIFA 25", items=self.ITEMS, total="300", paid="300", start="10:00", end="11:00")
+        b = make(name="B", game="fifa 25", start="12:00", end="14:00", total="200", paid="200",
+                 items=[SaleItem("Chips", "Snack", 1, 2500)])
+        c = make(name="C", game="GTA V", start="15:00", end="16:00", total="100", paid="100")
+        d = make(name="D", start="17:00", end="18:00", total="100", paid="100")
+        rows = [a, b, c, d]
+
+        games = an.game_stats(rows)
+        self.assertEqual([(g.game, g.count, g.minutes) for g in games], [("FIFA 25", 2, 180), ("GTA V", 1, 60)])
+        self.assertEqual(an.game_stats(rows, an.METRIC_HOURS)[0].game, "FIFA 25")
+        self.assertEqual(an.game_stats([d]), [])
+
+        by_sales = an.item_sales(rows)
+        self.assertEqual([(i.name, i.units, i.sales_paise) for i in by_sales],
+                         [("Chips", 3, 6500), ("Cold Coffee", 1, 6000)])
+        self.assertEqual(an.item_sales(rows, kind="Drink")[0].name, "Cold Coffee")
+        self.assertEqual(an.item_sales(rows, metric=an.ITEM_METRIC_UNITS)[0].name, "Chips")
+        self.assertEqual(an.sales_by_kind(rows), {"Snack": 6500, "Drink": 6000})
+
+        s = an.summarize(rows)
+        self.assertEqual((s.items_paise, s.items_units, s.playing_paise), (12500, 4, s.total_paise - 12500))
+
+        e1 = prepare_expense(amount_text="100", note_text="Ice", now=NOW)
+        e2 = prepare_expense(amount_text="50", note_text="Tape", now=NOW + timedelta(days=2))
+        self.assertEqual(an.expenses_in_range([e1, e2], DAY, DAY), [e1])
+        self.assertEqual(len(an.expenses_in_range([e1, e2], None, None)), 2)
+        self.assertEqual(an.expenses_in_range([e1, e2], None, None, search="tape"), [e2])
 
 
 if __name__ == "__main__":

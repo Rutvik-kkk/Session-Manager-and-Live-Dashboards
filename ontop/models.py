@@ -14,6 +14,11 @@ from typing import Iterable, Sequence
 from .config import (
     CLOSING_TIME,
     DEVICES,
+    ITEM_KINDS,
+    MAX_EXPENSE_NOTE_LENGTH,
+    MAX_GAME_LENGTH,
+    MAX_ITEM_NAME_LENGTH,
+    MAX_ITEM_QUANTITY,
     OPENING_TIME,
     PASS_HOURS,
     PASS_VALID_DAYS,
@@ -107,6 +112,73 @@ class Extension:
         return ext
 
 
+@dataclass(frozen=True)
+class SaleItem:
+    """One line of snacks or drinks sold with a session, priced when it was added.
+
+    The price is stored on the line so changing the menu later never alters old sales.
+    """
+
+    name: str
+    kind: str
+    quantity: int
+    unit_paise: int
+
+    @property
+    def amount_paise(self) -> int:
+        return self.quantity * self.unit_paise
+
+    def problems(self) -> list[str]:
+        errors: list[str] = []
+        if not isinstance(self.name, str) or not normalise_name(self.name):
+            errors.append("an item has no name")
+        elif self.name != normalise_name(self.name) or len(self.name) > MAX_ITEM_NAME_LENGTH:
+            errors.append(f"item name '{self.name}' is not valid")
+        if self.kind not in ITEM_KINDS:
+            errors.append(f"item '{self.name}' must be a {' or '.join(ITEM_KINDS).lower()}")
+        if not _is_int(self.quantity) or not 1 <= self.quantity <= MAX_ITEM_QUANTITY:
+            errors.append(f"item '{self.name}' quantity must be between 1 and {MAX_ITEM_QUANTITY}")
+        if not _is_int(self.unit_paise) or self.unit_paise < 0:
+            errors.append(f"item '{self.name}' price cannot be negative")
+        return errors
+
+    def to_dict(self) -> dict:
+        return {"name": self.name, "kind": self.kind, "quantity": self.quantity, "unit_price_paise": self.unit_paise}
+
+    @classmethod
+    def from_dict(cls, data: object) -> "SaleItem":
+        if not isinstance(data, dict):
+            raise ValueError("item is not an object")
+        reader = _Reader(data)
+        item = cls(reader.text("name"), reader.text("kind"), reader.integer("quantity"),
+                   reader.integer("unit_price_paise"))
+        if reader.errors:
+            raise ValueError("; ".join(reader.errors))
+        problems = item.problems()
+        if problems:
+            raise ValueError("; ".join(problems))
+        return item
+
+
+def merge_items(items: Iterable[SaleItem]) -> list[SaleItem]:
+    """Combine lines with the same name, kind and price; keeps the first-seen order."""
+    merged: dict[tuple[str, str, int], SaleItem] = {}
+    for item in items:
+        key = (item.name.casefold(), item.kind, item.unit_paise)
+        old = merged.get(key)
+        merged[key] = item if old is None else replace(old, quantity=old.quantity + item.quantity)
+    return list(merged.values())
+
+
+def items_total(items: Iterable[SaleItem]) -> int:
+    return sum(i.amount_paise for i in items)
+
+
+def fmt_items(items: Sequence[SaleItem]) -> str:
+    """Short text such as '2 × Cold Coffee, Chips'."""
+    return ", ".join(f"{i.quantity} × {i.name}" if i.quantity > 1 else i.name for i in items)
+
+
 @dataclass
 class Session:
     id: str
@@ -124,10 +196,17 @@ class Session:
     players: int = 1
     pass_id: str | None = None
     notes: str = ""
+    game: str | None = None
+    items: list[SaleItem] = field(default_factory=list)
 
     @property
     def duration_minutes(self) -> int:
         return duration_between(self.start, self.end)
+
+    @property
+    def items_paise(self) -> int:
+        """Money from snacks and drinks (already included in the total charge)."""
+        return items_total(self.items)
 
     @property
     def pass_minutes(self) -> int:
@@ -152,11 +231,16 @@ class Session:
         return self.local_start.date()
 
     def copy(self) -> "Session":
-        return replace(self, extensions=list(self.extensions))
+        return replace(self, extensions=list(self.extensions), items=list(self.items))
 
     def problems(self) -> list[str]:
         """Structural rules every stored record must satisfy (empty when valid)."""
         errors: list[str] = []
+        game_error = game_problem(self.game)
+        if game_error:
+            errors.append(game_error)
+        for item in self.items:
+            errors.extend(item.problems())
         if not isinstance(self.id, str) or not self.id.strip():
             errors.append("missing session id")
         name_error = name_problem(self.customer_name)
@@ -202,6 +286,8 @@ class Session:
             "last_updated": to_iso(self.last_updated),
             "extension_history": [ext.to_dict() for ext in self.extensions],
             "notes": self.notes,
+            "game": self.game,
+            "items": [item.to_dict() for item in self.items],
         }
 
     @classmethod
@@ -227,6 +313,20 @@ class Session:
         notes = data.get("notes", "")
         if not isinstance(notes, str):
             reader.errors.append("'notes' must be text")
+        game = data.get("game")
+        if game is not None and not isinstance(game, str):
+            reader.errors.append("'game' must be text or null")
+            game = None
+        items: list[SaleItem] = []
+        item_records = data.get("items", [])
+        if not isinstance(item_records, list):
+            reader.errors.append("'items' must be a list")
+        else:
+            for i, record in enumerate(item_records, start=1):
+                try:
+                    items.append(SaleItem.from_dict(record))
+                except ValueError as exc:
+                    reader.errors.append(f"item #{i}: {exc}")
 
         extensions: list[Extension] = []
         history = data.get("extension_history", None)
@@ -258,6 +358,8 @@ class Session:
             players=players,
             pass_id=pass_id,
             notes=notes,
+            game=game,
+            items=items,
         )
         problems = session.problems()
         if not problems and stored_duration != session.duration_minutes:
@@ -368,6 +470,85 @@ class MonthlyPass:
         return p
 
 
+@dataclass
+class Expense:
+    """Money an employee spent for the café: just an amount and a note, stamped with when it was entered."""
+
+    id: str
+    amount_paise: int
+    note: str
+    created_at: datetime
+    last_updated: datetime
+
+    @property
+    def spent_on(self) -> date:
+        """Local calendar date the expense was entered (used by date filters)."""
+        return to_local(self.created_at).date()
+
+    def copy(self) -> "Expense":
+        return replace(self)
+
+    def problems(self) -> list[str]:
+        errors: list[str] = []
+        if not isinstance(self.id, str) or not self.id.strip():
+            errors.append("missing expense id")
+        if not _is_int(self.amount_paise) or self.amount_paise <= 0:
+            errors.append("expense amount must be more than zero")
+        if not isinstance(self.note, str) or not self.note.strip():
+            errors.append("expense note is required")
+        elif self.note != normalise_notes(self.note) or len(self.note) > MAX_EXPENSE_NOTE_LENGTH:
+            errors.append("expense note is not valid")
+        if self.last_updated < self.created_at:
+            errors.append("last updated time is earlier than creation time")
+        return errors
+
+    def to_dict(self) -> dict:
+        return {
+            "id": self.id,
+            "amount_paise": self.amount_paise,
+            "note": self.note,
+            "created_at": to_iso(self.created_at),
+            "last_updated": to_iso(self.last_updated),
+        }
+
+    @classmethod
+    def from_dict(cls, data: object) -> "Expense":
+        if not isinstance(data, dict):
+            raise ValueError("expense is not a JSON object")
+        reader = _Reader(data)
+        expense = cls(reader.text("id"), reader.integer("amount_paise"), reader.text("note"),
+                      reader.timestamp("created_at"), reader.timestamp("last_updated"))
+        if reader.errors:
+            raise ValueError("; ".join(reader.errors))
+        problems = expense.problems()
+        if problems:
+            raise ValueError("; ".join(problems))
+        return expense
+
+
+def prepare_expense(*, amount_text: str, note_text: str, now: datetime,
+                    existing: Expense | None = None) -> Expense:
+    """Validate the two expense fields and return a ready-to-store Expense."""
+    errors: list[str] = []
+    amount = None
+    try:
+        amount = parse_money(amount_text, "Amount")
+        if amount <= 0:
+            errors.append("Amount must be more than zero.")
+    except ValueError as exc:
+        errors.append(str(exc))
+    note = normalise_notes(note_text)
+    if not note:
+        errors.append("Enter a note saying what the money was spent on.")
+    elif len(note) > MAX_EXPENSE_NOTE_LENGTH:
+        errors.append(f"Note must be at most {MAX_EXPENSE_NOTE_LENGTH} characters (currently {len(note)}).")
+    if errors:
+        raise ValidationError(errors)
+    if existing is not None:
+        return replace(existing, amount_paise=amount, note=note, last_updated=max(now, existing.created_at))
+    return Expense(str(uuid.uuid4()), amount, note, now, now)
+
+
 class _Reader:
     """Collects type errors while reading fields from a JSON object."""
 
@@ -449,6 +630,19 @@ def notes_problem(notes: object) -> str | None:
         return "Note must be text."
     if len(notes) > MAX_NOTES_LENGTH:
         return f"Note must be at most {MAX_NOTES_LENGTH} characters (currently {len(notes)})."
+    return None
+
+
+def game_problem(game: object) -> str | None:
+    """The game is optional (None); when given it must be a trimmed name."""
+    if game is None:
+        return None
+    if not isinstance(game, str) or not normalise_name(game):
+        return "Game name cannot be empty."
+    if game != normalise_name(game):
+        return "game name has leading/trailing or repeated spaces"
+    if len(game) > MAX_GAME_LENGTH:
+        return f"Game name must be at most {MAX_GAME_LENGTH} characters."
     return None
 
 
@@ -755,6 +949,8 @@ def prepare_session(
     monthly_pass: MonthlyPass | None = None,
     pass_used_by_others: int = 0,
     notes_text: str = "",
+    game: str | None = None,
+    items: Sequence[SaleItem] = (),
 ) -> Session:
     """Validate raw form values and return a ready-to-store Session.
 
@@ -809,6 +1005,14 @@ def prepare_session(
     if problem:
         errors.append(problem)
 
+    game = normalise_name(game) if game and game.strip() else None
+    problem = game_problem(game)
+    if problem:
+        errors.append(problem)
+    items = list(items)
+    for item in items:
+        errors.extend(item.problems())
+
     if errors:
         raise ValidationError(errors)
 
@@ -830,6 +1034,8 @@ def prepare_session(
             players=players,
             pass_id=pass_id,
             notes=notes,
+            game=game,
+            items=items,
         )
     return Session(
         id=str(uuid.uuid4()),
@@ -847,4 +1053,6 @@ def prepare_session(
         players=players,
         pass_id=pass_id,
         notes=notes,
+        game=game,
+        items=items,
     )

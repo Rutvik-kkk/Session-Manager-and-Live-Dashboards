@@ -137,6 +137,12 @@ main { padding: 18px 24px 40px; max-width: 1500px; margin: 0 auto; }
 .chart .area.good { fill: var(--success); }
 .chart circle.dot { fill: var(--info); }
 .chart circle.dot.good { fill: var(--success); }
+.chart .plot.ranked { min-height: 0; }
+.chart text.rank-name { fill: var(--text); font-size: 12px; }
+.chart rect.bar.snack { fill: var(--accent); }
+.chart rect.bar.drink { fill: var(--info); }
+.legend .swatch.snack { background: var(--accent); }
+.legend .swatch.drink { background: var(--info); }
 .chart .empty { color: var(--muted); padding: 30px 0; text-align: center; }
 .chart-controls { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: flex-end; margin: -4px 0 10px; }
 .chart-controls label { display: flex; flex-direction: column; gap: 3px; font-size: .78rem; color: var(--muted); }
@@ -167,6 +173,9 @@ th button::after { content: ""; margin-left: 4px; }
 th[aria-sort="ascending"] button::after { content: "▲"; font-size: .7em; }
 th[aria-sort="descending"] button::after { content: "▼"; font-size: .7em; }
 td.num, th.num { text-align: right; }
+/* Long text (game names, item lists) is cut with an ellipsis; the full text is in the hover title. */
+td.clip { max-width: 240px; overflow: hidden; text-overflow: ellipsis; }
+td.wrap { white-space: normal; min-width: 220px; overflow-wrap: anywhere; }
 tbody tr:hover { background: var(--surface-2); }
 .badge { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: .78rem; background: var(--surface-2); color: var(--muted); margin-left: 6px; }
 .status { font-weight: 600; }
@@ -208,6 +217,13 @@ tbody tr:hover { background: var(--surface-2); }
 .block.Paid { background: var(--success); }
 .block.Unpaid { background: var(--danger); }
 .block.Partially { background: var(--warning); }
+.block { cursor: pointer; }
+.block.selected, .block:focus-visible { outline: 2px solid var(--text); outline-offset: -2px; }
+#details { margin-top: 16px; }
+.details { display: grid; grid-template-columns: max-content 1fr; gap: 6px 18px; margin: 0; }
+.details dt { color: var(--muted); }
+.details dd { margin: 0; overflow-wrap: anywhere; }
+.details ul { margin: 0; padding-left: 18px; }
 .block strong { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .block span { white-space: nowrap; }
 .now-line { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--accent); pointer-events: none; }

@@ -14,6 +14,7 @@
     <nav aria-label="Pages">
       <a href="/">Dashboard</a>
       <a href="/mapping" aria-current="page">Session Mapping</a>
+      <a href="/expenses">Expenses</a>
     </nav>
     <div id="sync-status" class="sync" role="status"></div>
     <div class="user"><span id="user-name"></span><button id="logout" class="ghost" type="button">Sign out</button></div>
@@ -44,6 +45,12 @@
       <div class="key">
         <span><i class="Paid"></i>Paid</span><span><i class="Partially"></i>Partially paid</span><span><i class="Unpaid"></i>Unpaid</span>
       </div>
+    </section>
+
+    <section class="card" id="details" aria-live="polite">
+      <h2>Session details</h2>
+      <p class="muted small" id="details-empty">Tap a booking above to see its game and snacks &amp; drinks.</p>
+      <dl class="details" id="details-list" hidden></dl>
     </section>
 
     <div class="footer-note"><span id="updated-at"></span><button type="button" id="refresh" class="ghost">Refresh now</button></div>

@@ -1,4 +1,4 @@
-"""Upload new and changed sessions and passes to the online dashboard (cafe-web Worker).
+"""Upload new and changed sessions, passes and expenses to the online dashboard (cafe-web Worker).
 
 Threading: Tkinter is not thread-safe, so ``SyncController`` runs on the Tk thread. Every
 ``interval_seconds``, after every saved entry or edit, and on "Sync Now" it copies the records into plain dicts and hands them
@@ -33,7 +33,7 @@ from urllib.parse import urlsplit
 
 from . import config as cafe_config
 from .formatting import fmt_clock, now_local, parse_iso, to_iso, to_local
-from .models import MonthlyPass, Session
+from .models import Expense, MonthlyPass, Session
 
 CONFIG_FILE = "sync_config.json"
 STATE_FILE = "sync_state.json"
@@ -42,8 +42,11 @@ BATCH_SIZE = 40  # the Worker accepts at most 40 records per request
 RETRY_DELAYS = (2, 10, 30)  # seconds between attempts of one request
 REQUEST_TIMEOUT = 20
 MIN_TOKEN_LENGTH = 32
-USER_AGENT = "OnTopGaming-Desktop-Sync/1"
-KINDS = ("sessions", "passes")
+USER_AGENT = "OnTopGaming-Desktop-Sync/2"
+KINDS = ("sessions", "passes", "expenses")
+# The Worker reports the version of the sync protocol it understands. Version 2 added games, snacks &
+# drinks and expenses; an older Worker would silently drop them, so the upload is refused instead.
+API_VERSION = 2
 
 
 class SyncError(Exception):
@@ -119,8 +122,20 @@ def session_payload(s: Session) -> dict:
         "paid_paise": s.paid_paise,
         "payment_status": s.payment_status,
         "extension_minutes": sum(e.minutes_added for e in s.extensions),
+        "game": s.game,
+        "items": [item.to_dict() for item in s.items],
         "entry_time": to_iso(s.entry_time),
         "last_updated": to_iso(s.last_updated),
+    }
+
+
+def expense_payload(e: Expense) -> dict:
+    return {
+        "id": e.id,
+        "amount_paise": e.amount_paise,
+        "note": e.note,
+        "created_at": to_iso(e.created_at),
+        "last_updated": to_iso(e.last_updated),
     }
 
 
@@ -142,16 +157,18 @@ def pass_payload(p: MonthlyPass) -> dict:
 class Snapshot:
     sessions: list[dict]
     passes: list[dict]
+    expenses: list[dict]
     cafe: dict
 
 
-def take_snapshot(sessions: list[Session], passes: list[MonthlyPass]) -> Snapshot:
+def take_snapshot(sessions: list[Session], passes: list[MonthlyPass],
+                  expenses: list[Expense] | None = None) -> Snapshot:
     return Snapshot(
         sessions=[session_payload(s) for s in sessions],
         passes=[pass_payload(p) for p in passes],
+        expenses=[expense_payload(e) for e in expenses or []],
         cafe={
-            "devices": list(cafe_config.DEVICES),
-            "opening": cafe_config.OPENING_TIME.strftime("%H:%M"),
+            "devices": list(cafe_config.DEVICES),            "opening": cafe_config.OPENING_TIME.strftime("%H:%M"),
             "closing": cafe_config.CLOSING_TIME.strftime("%H:%M"),
         },
     )
@@ -361,6 +378,11 @@ def run_sync(snapshot: Snapshot, config: SyncConfig, state: SyncState, *, transp
             if body["final"]:
                 body["cafe"] = snapshot.cafe
             reply = _post_with_retry(transport, config, body, stop, delays)
+            version = reply.get("api_version")
+            if not isinstance(version, int) or version < API_VERSION:
+                raise SyncError(
+                    "The online dashboard is out of date. Deploy the latest cafe-web (apply its database "
+                    "migrations, then run 'npm run deploy') so games, snacks & drinks and expenses can sync.")
             result.sent += len(batch)
             dataset_id = reply.get("dataset_id")
             if not isinstance(dataset_id, str):
@@ -513,7 +535,7 @@ class SyncController:
             self._again = True
             return
         try:
-            snapshot = take_snapshot(self.store.sessions, self.store.passes)
+            snapshot = take_snapshot(self.store.sessions, self.store.passes, self.store.expenses)
         except Exception as exc:  # noqa: BLE001 - never let sync break the app
             self.last_result = SyncResult(ok=False, finished_at=now_local(), error=f"Could not read records: {exc}")
             self._report()
@@ -563,7 +585,7 @@ class SyncController:
             return self.config_error
         if not self.enabled:
             return ("Online sync is not set up. Copy sync_config.example.json to sync_config.json next to "
-                    "main.py, fill in the dashboard address and SYNC_TOKEN, then restart the app.")
+                    "main.py (or the .exe), fill in the dashboard address and SYNC_TOKEN, then restart the app.")
         r = self.last_result
         lines = []
         if self.last_success:

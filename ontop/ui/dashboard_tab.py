@@ -24,6 +24,8 @@ from ..analytics import (  # noqa: E402
     DEVICE_SORTS,
     GROUP_DAY,
     GROUPINGS,
+    ITEM_METRIC_SALES,
+    ITEM_METRICS,
     METRIC_CHARGES,
     METRIC_COUNT,
     METRIC_HOURS,
@@ -36,7 +38,10 @@ from ..analytics import (  # noqa: E402
     busy_hour_counts,
     device_stats,
     earnings_series,
+    expenses_in_range,
     filter_sessions,
+    game_stats,
+    item_sales,
     passes_sold,
     preset_range,
     received_by_method,
@@ -45,7 +50,7 @@ from ..analytics import (  # noqa: E402
     time_series,
 )
 from .. import formatting  # noqa: E402
-from ..config import CLOSING_TIME, OPENING_TIME  # noqa: E402
+from ..config import CLOSING_TIME, ITEM_DRINK, ITEM_SNACK, OPENING_TIME  # noqa: E402
 from ..formatting import (  # noqa: E402
     fmt_date,
     fmt_date_long,
@@ -69,6 +74,11 @@ ALL = "All"
 ASCENDING = "Ascending"
 DESCENDING = "Descending"
 CHART_HEIGHT = 300
+TOP_N = 10  # bars shown in the games and snacks & drinks charts
+
+# What the snacks & drinks chart can be limited to: label -> item kind (None = both).
+ITEM_KIND_CHOICES = {"Snacks & Drinks": None, "Snacks only": ITEM_SNACK, "Drinks only": ITEM_DRINK}
+GAME_METRICS = (METRIC_COUNT, METRIC_HOURS)
 
 matplotlib.rcParams.update(
     {
@@ -126,6 +136,14 @@ CARD_SPECS = [
      "to a console. Not included in session charges or amount received."),
     ("pass_hours", "Pass hours used",
      "Time deducted from monthly passes by the selected sessions (billed in 30-minute blocks)."),
+    ("items", "Snacks & drinks sales",
+     "Snacks and drinks sold with the selected sessions, at the prices they were sold for. This money is "
+     "already part of Total session charges."),
+    ("games", "Games played",
+     "Selected sessions that name a game. The game is optional, so sessions without one are not counted here."),
+    ("expenses", "Employee expenses",
+     "Money employees recorded as spent in the Expenses tab, by the day it was entered. Only the date range "
+     "applies; the device, payment and customer filters do not. Not subtracted from any other figure."),
 ]
 
 
@@ -149,6 +167,9 @@ class DashboardTab(ttk.Frame):
         self.dev_sort_var = tk.StringVar(value=SORT_DEVICE_NAME)
         self.dev_order_var = tk.StringVar(value=ASCENDING)
         self.busy_period_var = tk.StringVar(value=PRESET_THIS_MONTH)
+        self.snack_kind_var = tk.StringVar(value=next(iter(ITEM_KIND_CHOICES)))
+        self.snack_metric_var = tk.StringVar(value=ITEM_METRIC_SALES)
+        self.game_metric_var = tk.StringVar(value=METRIC_COUNT)
 
         self.applied = DashboardFilters()
         self.rows: list[Session] = []
@@ -166,6 +187,9 @@ class DashboardTab(ttk.Frame):
         for var in (self.dev_metric_var, self.dev_sort_var, self.dev_order_var):
             var.trace_add("write", lambda *_: self._render_chart("device", self._draw_devices))
         self.busy_period_var.trace_add("write", lambda *_: self._render_busy())
+        for var in (self.snack_kind_var, self.snack_metric_var):
+            var.trace_add("write", lambda *_: self._render_snacks())
+        self.game_metric_var.trace_add("write", lambda *_: self._render_games())
 
     # ------------------------------------------------------------------
     # Layout
@@ -211,6 +235,8 @@ class DashboardTab(ttk.Frame):
             ("activity", "Session activity", "Number of sessions"),
             ("device", "Device comparison", None),
             ("methods", "Payment methods", "Amount received, attributed to each session's saved method"),
+            ("snacks", "Snacks & drinks sales", f"Top {TOP_N} items sold with the selected sessions"),
+            ("games", "Games played", f"Top {TOP_N} games named on the selected sessions"),
             ("busy", "Busy hours", "Sessions playing during each hour"),
         ]
         for key, title, subtitle in specs:
@@ -222,6 +248,10 @@ class DashboardTab(ttk.Frame):
                 ttk.Label(top, text=subtitle, style="CardSmall.TLabel").pack(side="left", padx=10, pady=(3, 0))
             if key == "device":
                 self._build_device_controls(inner)
+            elif key == "snacks":
+                self._build_snack_controls(inner)
+            elif key == "games":
+                self._build_game_controls(inner)
             elif key == "busy":
                 self._build_busy_controls(inner)
             holder = ttk.Frame(inner, style="Inner.TFrame", height=theme.px(CHART_HEIGHT))
@@ -239,7 +269,7 @@ class DashboardTab(ttk.Frame):
         ttk.Label(top, text="Click a column heading to sort; double-click a row to edit.",
                   style="CardSmall.TLabel").pack(side="left", padx=10, pady=(3, 0))
         base = {c.key: c for c in session_columns()}
-        cols = [base[k] for k in ("customer", "device", "players", "start", "duration", "total")]
+        cols = [base[k] for k in ("customer", "device", "game", "players", "start", "duration", "items", "total")]
         cols.append(dataclasses.replace(base["paid"], heading="Amount received"))
         cols += [base["balance"], dataclasses.replace(base["method"], heading="Payment method"),
                  dataclasses.replace(base["status"], heading="Payment status")]
@@ -303,6 +333,23 @@ class DashboardTab(ttk.Frame):
                      width=13).pack(side="left", padx=(6, 12))
         ttk.Combobox(row, textvariable=self.dev_order_var, values=(ASCENDING, DESCENDING), state="readonly",
                      width=11).pack(side="left")
+
+    def _build_snack_controls(self, parent):
+        row = ttk.Frame(parent, style="Inner.TFrame")
+        row.pack(fill="x", pady=(6, 0))
+        ttk.Label(row, text="Type", style="CardMuted.TLabel").pack(side="left")
+        ttk.Combobox(row, textvariable=self.snack_kind_var, values=list(ITEM_KIND_CHOICES), state="readonly",
+                     width=14).pack(side="left", padx=(6, 12))
+        ttk.Label(row, text="Show", style="CardMuted.TLabel").pack(side="left")
+        ttk.Combobox(row, textvariable=self.snack_metric_var, values=ITEM_METRICS, state="readonly",
+                     width=12).pack(side="left", padx=(6, 0))
+
+    def _build_game_controls(self, parent):
+        row = ttk.Frame(parent, style="Inner.TFrame")
+        row.pack(fill="x", pady=(6, 0))
+        ttk.Label(row, text="Show", style="CardMuted.TLabel").pack(side="left")
+        ttk.Combobox(row, textvariable=self.game_metric_var, values=GAME_METRICS, state="readonly",
+                     width=13).pack(side="left", padx=(6, 0))
 
     def _build_busy_controls(self, parent):
         row = ttk.Frame(parent, style="Inner.TFrame")
@@ -434,6 +481,8 @@ class DashboardTab(ttk.Frame):
         self._render_chart("activity", self._draw_activity)
         self._render_chart("device", self._draw_devices)
         self._render_chart("methods", self._draw_methods)
+        self._render_snacks()
+        self._render_games()
         self._render_busy()
 
         self.table.set_items(self.rows)
@@ -464,6 +513,15 @@ class DashboardTab(ttk.Frame):
         put("pass_sales", fmt_money(sum(p.price_paise for p in sold)),
             f"{len(sold)} pass{'es' if len(sold) != 1 else ''} bought in range")
         put("pass_hours", fmt_hours(s.pass_minutes), f"{s.pass_sessions} pass session(s)")
+        put("items", fmt_money(s.items_paise),
+            f"{s.items_units} item{'s' if s.items_units != 1 else ''} sold · {fmt_money(s.playing_paise)} playing time")
+        games = game_stats(self.rows)
+        played = sum(g.count for g in games)
+        put("games", str(played), f"top: {games[0].game} ({games[0].count})" if games else "no game recorded")
+        start, end = self._range
+        spent = expenses_in_range(self.app.store.expenses, start, end)
+        put("expenses", fmt_money(sum(e.amount_paise for e in spent)),
+            f"{len(spent)} expense{'s' if len(spent) != 1 else ''} in range")
 
     # ------------------------------------------------------------------
     # Charts
@@ -490,7 +548,21 @@ class DashboardTab(ttk.Frame):
         self.busy_note.configure(text=f"{span} · {n} session{'s' if n != 1 else ''} · other filters still apply")
         self._render_chart("busy", lambda ax: self._draw_busy(ax, rows), has_data=bool(rows))
 
-    def _render_chart(self, key: str, draw: Callable, has_data: bool | None = None):
+    def _snack_rows(self):
+        kind = ITEM_KIND_CHOICES.get(self.snack_kind_var.get())
+        return item_sales(self.rows, kind, self.snack_metric_var.get())[:TOP_N]
+
+    def _render_snacks(self):
+        rows = self._snack_rows()
+        self._render_chart("snacks", lambda ax: self._draw_snacks(ax, rows), has_data=bool(rows),
+                           empty_text="No snacks or drinks sold")
+
+    def _render_games(self):
+        rows = game_stats(self.rows, self.game_metric_var.get())[:TOP_N]
+        self._render_chart("games", lambda ax: self._draw_games(ax, rows), has_data=bool(rows),
+                           empty_text="No games recorded")
+
+    def _render_chart(self, key: str, draw: Callable, has_data: bool | None = None, empty_text: str | None = None):
         holder = self.holders[key]
         old = self._charts.pop(key, None)
         if old is not None:
@@ -508,7 +580,7 @@ class DashboardTab(ttk.Frame):
         if self.rows if has_data is None else has_data:
             draw(ax)
         else:
-            self._empty(ax)
+            self._empty(ax, empty_text) if empty_text else self._empty(ax)
         canvas = FigureCanvasTkAgg(fig, master=holder)
         widget = canvas.get_tk_widget()
         widget.configure(background=theme.SURFACE, highlightthickness=0)
@@ -632,6 +704,52 @@ class DashboardTab(ttk.Frame):
         ax.bar_label(bars, labels=[fmt_money_compact(v) for v in values], color=theme.TEXT, fontsize=9, padding=3)
         inr_axis(ax)
         self._headroom(ax, values)
+
+    @staticmethod
+    def _ranked_bars(ax, labels: list[str], values: list[float], colors: list[str], fmt: Callable[[float], str]):
+        """Horizontal bars with the biggest on top (long item and game names stay readable)."""
+        y = list(range(len(labels)))
+        bars = ax.barh(y, values, 0.62, color=colors)
+        ax.set_yticks(y)
+        ax.set_yticklabels([n if len(n) <= 22 else n[:21] + "…" for n in labels])
+        ax.invert_yaxis()
+        ax.grid(axis="y", visible=False)
+        ax.grid(axis="x", color=theme.BORDER, linewidth=0.6, alpha=0.8)
+        ax.bar_label(bars, labels=[fmt(v) for v in values], color=theme.TEXT, fontsize=8.5, padding=3)
+        top = max(values) if values else 0
+        ax.set_xlim(0, top * 1.22 if top > 0 else 1)
+
+    def _draw_snacks(self, ax, rows):
+        sales = self.snack_metric_var.get() == ITEM_METRIC_SALES
+        values = [r.metric(self.snack_metric_var.get()) for r in rows]
+        colors = [theme.KIND_COLORS.get(r.kind, theme.ACCENT) for r in rows]
+        self._ranked_bars(ax, [r.name for r in rows], values, colors,
+                          fmt_money_compact if sales else lambda v: f"{int(v)}")
+        if sales:
+            ax.xaxis.set_major_formatter(FuncFormatter(lambda v, _pos: fmt_money_compact(v)))
+        else:
+            ax.xaxis.set_major_locator(MaxNLocator(integer=True))
+        ax.set_xlabel("Sales" if sales else "Units sold")
+        kinds = {r.kind for r in rows}
+        if len(kinds) > 1:
+            from matplotlib.patches import Patch
+
+            handles = [Patch(color=theme.KIND_COLORS[k], label=k + "s") for k in (ITEM_SNACK, ITEM_DRINK) if k in kinds]
+            leg = ax.legend(handles=handles, loc="lower right", frameon=True, fontsize=8.5)
+            leg.get_frame().set_facecolor(theme.SURFACE_2)
+            leg.get_frame().set_edgecolor(theme.BORDER)
+            for text in leg.get_texts():
+                text.set_color(theme.TEXT)
+
+    def _draw_games(self, ax, rows):
+        metric = self.game_metric_var.get()
+        values = [g.metric(metric) for g in rows]
+        hours = metric == METRIC_HOURS
+        self._ranked_bars(ax, [g.game for g in rows], values, [theme.ACCENT] * len(rows),
+                          (lambda v: f"{v:,.1f} h") if hours else (lambda v: f"{int(v)}"))
+        if not hours:
+            ax.xaxis.set_major_locator(MaxNLocator(integer=True))
+        ax.set_xlabel("Booked hours" if hours else "Sessions")
 
     def _draw_busy(self, ax, rows: list[Session]):
         counts = busy_hour_counts(rows)

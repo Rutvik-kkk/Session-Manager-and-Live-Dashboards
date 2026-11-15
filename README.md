@@ -19,6 +19,8 @@ Options:
 - `python main.py --data-dir PATH` uses another data folder (the `ONTOP_DATA_DIR` environment variable works too).
 - `python tools/make_demo_data.py --data-dir demo-data` then `python main.py --data-dir demo-data`
   lets you explore with generated sessions and passes. The demo tool refuses to write into the real `data/` folder.
+  Delete the demo folder when you are done; to remove demo records already uploaded to the website, see
+  *Starting from real data* in [cafe-web/README.md](cafe-web/README.md).
 
 Run the tests (the GUI tests need a display and are skipped without one):
 
@@ -28,8 +30,19 @@ python -m unittest discover -s tests -v
 
 ## Business rules
 
-Opening hours, prices and pass terms can be changed in **☰ menu → Configurations**. They are saved in
-`settings.json` in the data folder and take effect after a restart; the defaults below live in `ontop/config.py`.
+Opening hours, devices, prices, pass terms, games and the snacks & drinks menu can be changed in
+**☰ menu → Configurations** (tabs: General, Devices & Prices, Games, Snacks & Drinks). They are saved in
+`settings.json` in the data folder. Prices, games and the menu apply immediately; adding or removing a device, opening hours and pass terms take
+effect after a restart. The defaults below live in `ontop/config.py`.
+
+- **Devices & Prices**: add or remove devices and set the hourly price for 1–4 players (plus the half-hour price)
+  in each price column. A new device gets its own blank column that you fill in yourself, or you can pick **Same prices
+  as <device>** to share another device's column. Changing a price affects new entries from then on (an open new
+  entry is re-priced at once); saved sessions keep the amount they were charged. A device that has saved sessions
+  can't be renamed or removed.
+- **Games**: the list offered in the optional **Game** field of a session.
+- **Snacks & Drinks**: items with a kind (Snack or Drink) and a price. The price is copied onto each sale, so
+  changing the menu later never changes old sessions.
 The ☰ menu also has **Theme** and **Exit**. Midnight keeps the original square look; Dusk Blue, Lavender Haze,
 Alpine Dusk, Twinkle Sand, Violet Glass and Forest Lodge use rounded, borderless cards, buttons and fields
 (palettes live in `ontop/ui/theme.py`). **Clock Format** (also in Configurations) switches between 24-hour (18:30)
@@ -62,10 +75,11 @@ and 12-hour (6:30 PM) times; in 12-hour mode the start and end time fields get a
 ## Storage
 
 - Data is saved to `data/sessions.json` next to `main.py`. The folder and file are created on first launch.
-- Format: `{"schema_version": 2, "sessions": [...], "passes": [...]}`. Money is stored as integer paise.
-  Pass usage and time left are never stored; they are calculated from the sessions linked by `pass_id`.
-- Version 1 files (old device names ps5A/ps5B/ps4) are upgraded on the next save. Before that save, the
-  original file is copied to `sessions.v1-backup.json`. Older sessions outside opening hours stay valid.
+- Format: `{"schema_version": 3, "sessions": [...], "passes": [...], "expenses": [...]}`. Money is stored as integer
+  paise. Pass usage and time left are never stored; they are calculated from the sessions linked by `pass_id`.
+- Older files are upgraded on the next save, after the original is copied to `sessions.v1-backup.json` or
+  `sessions.v2-backup.json`. Version 1 used old device names (ps5A/ps5B/ps4). Older sessions simply have no game
+  and no snacks. Sessions outside opening hours stay valid.
 - Every save writes a temporary file, fsyncs it and atomically replaces `sessions.json`. A success message
   appears only after the replace succeeds. If a save fails, the form keeps your values.
 - If the file is corrupted or any record is invalid, the app shows what is wrong, displays the readable records,
@@ -91,6 +105,15 @@ conflicting manual choice is blocked. Use **Extend** or **+15 / +30 / +60 min** 
 against closing time, other bookings and remaining pass time). Nothing is written until **Save Session**
 or **Update Session** succeeds. Ctrl+S saves.
 
+**Game, snacks and drinks**: the **Game** field is optional (choose one from your list or leave it as None).
+The **Snacks & drinks** card sits right next to **Extend**: pick an item, set a quantity and **Add**; **Remove selected** /
+**One less** correct a line. The items are added to the suggested payment amount (shown on the card), and a
+price you typed yourself is left alone.
+
+**Expenses**: employees enter what they spent with just an **Amount (₹)** and a **Note**; the time it was entered is
+recorded automatically. Entries can be corrected with **Edit Selected** (or a double-click) but not deleted. The tab
+has a date range, a note search and the total spent.
+
 **Session Entry → Monthly Passes**: register or edit a pass, search by name or phone, filter by status
 (Active, Used up, Expired). Select a pass to see each session it was used for. **Start Session** opens
 a new session for that holder.
@@ -107,7 +130,10 @@ grouping, then **Apply Filters**. The cards, charts and breakdown table use the 
 "Amount received" is money received against those sessions, not cash collected in the date range, and not
 profit. **Earnings** shows money received per day (or week/month): session payments plus monthly pass sales.
 **Busy hours** shows how many sessions were playing during each hour; it has its own This Week / This Month /
-This Year / All Time selector, and the other filters still apply.
+This Year / All Time selector, and the other filters still apply. **Snacks & drinks sales** and **Games played**
+rank the top 10 items or games (snacks and drinks can be split and shown as sales or units; games as sessions or
+hours). Cards show snacks & drinks sales (already part of session charges), games played and employee expenses
+(date range only; expenses are not subtracted from any other figure).
 
 ## Online dashboard (optional)
 
@@ -122,10 +148,22 @@ dashboard address and the `SYNC_TOKEN` secret. Without that file the app works e
 - The header shows the last successful sync (click it for details) and has a **Sync Now** button; **Sync Now** is also in the ☰ menu.
 - The first sync uploads every record; later ones send only what changed. Upload progress is kept in
   `sync_state.json` in the data folder. Deleting it is safe; the next sync just checks everything again.
-- Session notes and pass holders' names and phone numbers are never uploaded.
+- Games, snacks & drinks and expenses are uploaded too (the website has charts for them and an Expenses page).
+  Session notes and pass holders' names and phone numbers are never uploaded.
+- After updating the desktop app, update the website first (database migration, then deploy); the app tells you if
+  the website is out of date. See [cafe-web/README.md](cafe-web/README.md).
 
 `sync_config.json`, `sync_state.json` and `sessions.json` are git-ignored. Keep the token private.
 
+## Packaged .exe (no Python needed)
+
+`powershell -ExecutionPolicy Bypass -File tools\build_exe.ps1` builds `dist\OnTopGaming\OnTopGaming.exe`, a single
+Windows file that contains Python, Tkinter, Matplotlib and the app. Copy that folder to any Windows 10/11 64-bit
+computer and double-click the `.exe`; nothing has to be installed. It keeps its files **next to the .exe**:
+`data\` (sessions, settings, sync progress) and `sync_config.json` (copy `sync_config.example.json`, fill it in,
+restart the app). Neither is inside the `.exe`, so the token and your records are never copied by accident.
+To move to a new computer with its records, also copy the old computer's `data\` folder (close the app first).
+The first start can take a few seconds while the `.exe` unpacks itself.
 ## Project layout
 
 ```
@@ -135,7 +173,7 @@ ontop/settings.py         settings.json load/save, applied to config at startup
 ontop/ui/settings_dialog.py  Configurations dialog
 ontop/pricing.py          price-list calculations
 ontop/formatting.py       date/time/money parsing and formatting
-ontop/models.py           Session and MonthlyPass records, validation, booking rules
+ontop/models.py           Session, MonthlyPass, SaleItem and Expense records, validation, booking rules
 ontop/analytics.py        filters, dashboard metrics, timeline geometry
 ontop/storage.py          JSON load/validate/upgrade, atomic save, instance lock
 ontop/sync.py             background upload to the online dashboard
@@ -143,6 +181,7 @@ ontop/ui/app.py           theme, header, tab navigation, cross-tab refresh
 ontop/ui/entry_tab.py     Session Entry → New Session
 ontop/ui/passes_tab.py    Session Entry → Monthly Passes
 ontop/ui/entries_tab.py   Previous Entries
+ontop/ui/expenses_tab.py  Expenses
 ontop/ui/mapping_tab.py   Session Mapping (Canvas timeline)
 ontop/ui/dashboard_tab.py Dashboard (Matplotlib via FigureCanvasTkAgg)
 ontop/ui/widgets.py       tooltip, scrollable frame, date picker, sortable table

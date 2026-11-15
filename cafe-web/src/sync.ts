@@ -1,7 +1,13 @@
 import { AppEnv, HttpError, istDate, isIsoDate, json, nowSeconds, readJson, safeEqual, sha256Hex } from "./util";
 
-// D1 on Workers Free allows 50 queries per request: 3 reads + one upsert per record + 2 status writes.
+// D1 on Workers Free allows 50 queries per request: at most 4 reads (dataset id + one lookup per kind
+// of record), one upsert per record and at most 4 status writes. 4 + 40 + 4 = 48.
 export const MAX_RECORDS_PER_REQUEST = 40;
+// Version 2 added games, snacks & drinks and expenses. The desktop app refuses a Worker that does not
+// report at least this, so an out-of-date Worker can never silently drop the new data.
+export const API_VERSION = 2;
+const ITEM_KINDS = ["Snack", "Drink"] as const;
+const MAX_ITEM_LINES = 50;
 const MAX_BODY_BYTES = 256 * 1024;
 const ID_RE = /^[A-Za-z0-9-]{1,64}$/;
 const ISO_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,6})?(Z|[+-]\d{2}:\d{2})$/;
@@ -59,6 +65,39 @@ class Fields {
     if (!isIsoDate(v)) throw new Invalid(`'${key}' must be a YYYY-MM-DD date`);
     return v;
   }
+
+  /** Optional text: missing, null or blank gives null. */
+  optionalText(key: string, max: number): string | null {
+    const v = this.data[key];
+    if (v === null || v === undefined) return null;
+    if (typeof v !== "string" || v.length > max) throw new Invalid(`'${key}' must be text of up to ${max} characters`);
+    return v.trim() ? v.trim() : null;
+  }
+
+  /** Snacks & drinks sold with a session. Missing means none (an older desktop app). */
+  items(key: string): { json: string; paise: number; units: number } {
+    const v = this.data[key];
+    if (v === null || v === undefined) return { json: "[]", paise: 0, units: 0 };
+    if (!Array.isArray(v) || v.length > MAX_ITEM_LINES) throw new Invalid(`'${key}' must be a list of up to ${MAX_ITEM_LINES} items`);
+    let paise = 0;
+    let units = 0;
+    const lines = v.map((raw) => {
+      if (typeof raw !== "object" || raw === null || Array.isArray(raw)) throw new Invalid(`'${key}' has an entry that is not an object`);
+      const line = new Fields(raw as Record<string, unknown>);
+      const kind = (raw as { kind?: unknown }).kind;
+      if (!ITEM_KINDS.some((k) => k === kind)) throw new Invalid(`an item's 'kind' must be ${ITEM_KINDS.join(" or ")}`);
+      const out = {
+        name: line.text("name", 60).trim(),
+        kind: kind as string,
+        quantity: line.int("quantity", 1, 99),
+        unit_paise: line.int("unit_price_paise", 0, 10_000_000),
+      };
+      paise += out.quantity * out.unit_paise;
+      units += out.quantity;
+      return out;
+    });
+    return { json: JSON.stringify(lines), paise, units };
+  }
 }
 
 function common(record: unknown): { f: Fields; id: string; revision: number } {
@@ -77,6 +116,7 @@ async function sessionRow(record: unknown, now: number): Promise<Row> {
   if (end - start !== duration * 60_000) throw new Invalid("'duration_minutes' does not match start and end");
   const total = f.int("total_paise", 0, MAX_MONEY);
   const paid = f.int("paid_paise", 0, total);
+  const items = f.items("items");
   const values = [
     f.text("customer_name", 80),
     f.text("device", 32),
@@ -92,6 +132,23 @@ async function sessionRow(record: unknown, now: number): Promise<Row> {
     f.text("payment_status", 32),
     f.int("extension_minutes", 0, 24 * 60),
     f.timestamp("entry_time"),
+    f.timestamp("last_updated"),
+    f.optionalText("game", 60),
+    items.json,
+    items.paise,
+    items.units,
+  ];
+  return { id, revision, values: [...values, now], hash: await sha256Hex(JSON.stringify(values)) };
+}
+
+async function expenseRow(record: unknown, now: number): Promise<Row> {
+  const { f, id, revision } = common(record);
+  const created = f.timestamp("created_at");
+  const values = [
+    f.int("amount_paise", 1, MAX_MONEY),
+    f.text("note", 200).trim(),
+    istDate(created),
+    created,
     f.timestamp("last_updated"),
   ];
   return { id, revision, values: [...values, now], hash: await sha256Hex(JSON.stringify(values)) };
@@ -120,9 +177,14 @@ const TABLES = {
     columns: [
       "customer_name", "device", "players", "pass_id", "start_ms", "end_ms", "start_date", "duration_minutes",
       "payment_method", "total_paise", "paid_paise", "payment_status", "extension_minutes", "entry_ms",
-      "updated_ms", "synced_at",
+      "updated_ms", "game", "items_json", "items_paise", "items_units", "synced_at",
     ],
     build: sessionRow,
+  },
+  expenses: {
+    table: "cafe_expenses",
+    columns: ["amount_paise", "note", "spent_on", "created_ms", "updated_ms", "synced_at"],
+    build: expenseRow,
   },
   passes: {
     table: "cafe_passes",
@@ -170,18 +232,18 @@ export async function handleSync(request: Request, env: AppEnv): Promise<Respons
   await checkToken(request, env);
   const body = (await readJson(request, MAX_BODY_BYTES)) as Record<string, unknown> | null;
   if (typeof body !== "object" || body === null) throw new HttpError(400, "Expected a JSON object.");
-  const lists: Record<Kind, unknown[]> = { sessions: [], passes: [] };
+  const lists: Record<Kind, unknown[]> = { sessions: [], passes: [], expenses: [] };
   for (const kind of Object.keys(TABLES) as Kind[]) {
     const value = body[kind] ?? [];
     if (!Array.isArray(value)) throw new HttpError(400, `'${kind}' must be a list.`);
     lists[kind] = value;
   }
-  if (lists.sessions.length + lists.passes.length > MAX_RECORDS_PER_REQUEST) {
+  if (lists.sessions.length + lists.passes.length + lists.expenses.length > MAX_RECORDS_PER_REQUEST) {
     throw new HttpError(413, `Send at most ${MAX_RECORDS_PER_REQUEST} records per request.`);
   }
   const now = nowSeconds();
-  const results: Record<Kind, Record<string, Result>> = { sessions: {}, passes: {} };
-  const rows: Record<Kind, Row[]> = { sessions: [], passes: [] };
+  const results: Record<Kind, Record<string, Result>> = { sessions: {}, passes: {}, expenses: {} };
+  const rows: Record<Kind, Row[]> = { sessions: [], passes: [], expenses: [] };
   for (const kind of Object.keys(TABLES) as Kind[]) {
     const seen = new Set<string>();
     for (const record of lists[kind]) {
@@ -198,24 +260,28 @@ export async function handleSync(request: Request, env: AppEnv): Promise<Respons
     }
   }
 
+  // Only kinds that have records need a lookup, which keeps small uploads to a couple of queries.
+  const kinds = (Object.keys(TABLES) as Kind[]).filter((kind) => rows[kind].length > 0);
   const lookup = (kind: Kind) => {
     const ids = rows[kind].map((r) => r.id);
-    const sql = ids.length
-      ? `SELECT id, revision, content_hash FROM ${TABLES[kind].table} WHERE id IN (${ids.map(() => "?").join(", ")})`
-      : `SELECT id, revision, content_hash FROM ${TABLES[kind].table} WHERE 0`;
-    return env.DB.prepare(sql).bind(...ids);
+    return env.DB
+      .prepare(`SELECT id, revision, content_hash FROM ${TABLES[kind].table} WHERE id IN (${ids.map(() => "?").join(", ")})`)
+      .bind(...ids);
   };
-  const [datasetResult, sessionsResult, passesResult] = await env.DB.batch<Record<string, unknown>>([
+  const [datasetResult, ...lookups] = await env.DB.batch<Record<string, unknown>>([
     env.DB.prepare(`SELECT value FROM meta WHERE key = 'dataset_id'`),
-    lookup("sessions"),
-    lookup("passes"),
+    ...kinds.map(lookup),
   ]);
   const datasetId = (datasetResult.results[0]?.value as string | undefined) ?? null;
   if (!datasetId) throw new HttpError(503, "Database is not initialised; run schema.sql.");
   const existing: Record<Kind, Map<string, { revision: number; content_hash: string }>> = {
-    sessions: new Map(sessionsResult.results.map((r) => [r.id as string, r as { revision: number; content_hash: string }])),
-    passes: new Map(passesResult.results.map((r) => [r.id as string, r as { revision: number; content_hash: string }])),
+    sessions: new Map(),
+    passes: new Map(),
+    expenses: new Map(),
   };
+  kinds.forEach((kind, i) => {
+    for (const r of lookups[i].results) existing[kind].set(r.id as string, r as { revision: number; content_hash: string });
+  });
 
   const writes: D1PreparedStatement[] = [];
   const pending: { kind: Kind; row: Row; status: Status; index: number }[] = [];
@@ -264,5 +330,5 @@ export async function handleSync(request: Request, env: AppEnv): Promise<Respons
     }
   }
 
-  return json({ dataset_id: datasetId, server_time: now, final, results });
+  return json({ api_version: API_VERSION, dataset_id: datasetId, server_time: now, final, results });
 }

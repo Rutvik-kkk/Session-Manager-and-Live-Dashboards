@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 
 from ..analytics import SessionFilter, filter_sessions, summarize
 from ..formatting import fmt_date, fmt_datetime, fmt_duration, fmt_money, parse_date
-from ..models import DEVICES, PAYMENT_STATUSES, STATUS_PAID, Session
+from ..models import DEVICES, PAYMENT_STATUSES, STATUS_PAID, Session, fmt_items
 from . import dialogs
 from .widgets import Column, DateEntry, SortableTree, Tooltip, card
 
@@ -30,6 +30,7 @@ def session_columns(include_session_date: bool = True, include_end: bool = True,
         Column("customer", "Customer", lambda s: s.customer_name, lambda s: (s.customer_name.casefold(), s.start), 170),
         Column("device", "Device", lambda s: s.device, lambda s: (s.device.casefold(), s.start), 80, "center"),
         Column("players", "Players", lambda s: str(s.players), lambda s: (s.players, s.start), 65, "center"),
+        Column("game", "Game", lambda s: s.game or "—", lambda s: ((s.game or "~").casefold(), s.start), 130),
         Column("pass", "Pass", lambda s: fmt_duration(s.pass_minutes) if s.pass_id else "—",
                lambda s: (s.pass_minutes, s.start), 70, "center"),
     ]
@@ -41,6 +42,7 @@ def session_columns(include_session_date: bool = True, include_end: bool = True,
     cols += [
         Column("duration", "Duration", lambda s: fmt_duration(s.duration_minutes), lambda s: s.duration_minutes, 85, "e"),
         Column("method", "Method", lambda s: s.payment_method, lambda s: s.payment_method, 80, "center"),
+        Column("items", "Snacks & drinks", lambda s: fmt_items(s.items) or "—", lambda s: (s.items_paise, s.start), 170),
         Column("total", "Total charge", lambda s: fmt_money(s.total_paise), lambda s: s.total_paise, 110, "e"),
         Column("paid", "Amount paid", lambda s: fmt_money(s.paid_paise), lambda s: s.paid_paise, 110, "e"),
         Column("balance", "Balance", lambda s: fmt_money(s.balance_paise), lambda s: s.balance_paise, 100, "e"),

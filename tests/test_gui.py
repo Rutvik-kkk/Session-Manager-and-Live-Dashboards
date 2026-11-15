@@ -79,7 +79,7 @@ class GuiWorkflowTests(unittest.TestCase):
 
     def test_entry_and_passes_are_sub_tabs_of_session_entry(self):
         tabs = [self.app.notebook.tab(t, "text") for t in self.app.notebook.tabs()]
-        self.assertEqual(tabs, ["Session Entry", "Session Mapping", "Previous Entries", "Dashboard"])
+        self.assertEqual(tabs, ["Session Entry", "Session Mapping", "Previous Entries", "Expenses", "Dashboard"])
         subtabs = [self.app.entry_tabs.tab(t, "text") for t in self.app.entry_tabs.tabs()]
         self.assertEqual(subtabs, ["New Session", "Monthly Passes"])
         self.e.pass_var.set(True)
@@ -91,7 +91,7 @@ class GuiWorkflowTests(unittest.TestCase):
     def test_header_nav_and_menu(self):
         app = self.app
         self.assertEqual([b.cget("text") for b in app.nav_buttons.values()],
-                         ["Session Entry", "Session Mapping", "Previous Entries", "Dashboard"])
+                         ["Session Entry", "Session Mapping", "Previous Entries", "Expenses", "Dashboard"])
         app.nav_buttons[str(app.mapping)].invoke()
         self.pump()
         self.assertIs(app.current_tab(), app.mapping)
@@ -379,7 +379,7 @@ class GuiWorkflowTests(unittest.TestCase):
         e.save()
         d = self.app.dashboard
         self.pump()
-        self.assertEqual(d.chart_count(), 5)
+        self.assertEqual(d.chart_count(), 7)
         self.assertEqual(d.cards["charges"][1].cget("text"), "₹300.00")
         self.assertEqual(d.cards["received"][1].cget("text"), "₹150.00")
         d.device_var.set("PS4")
@@ -393,6 +393,271 @@ class GuiWorkflowTests(unittest.TestCase):
         d.table.sort_by("total")
         totals = [self.store.get(i).total_paise for i in d.table.displayed_ids()]
         self.assertEqual(totals, sorted(totals))
+
+
+    # ------------------------------------------------------------------
+    # Games, snacks & drinks, expenses and the Configurations tabs
+    # ------------------------------------------------------------------
+
+    def stock_catalogue(self):
+        import dataclasses
+
+        menu = [{"name": "Chips", "kind": "Snack", "price_paise": 2000},
+                {"name": "Cold Coffee", "kind": "Drink", "price_paise": 6000}]
+        new = dataclasses.replace(self.app.settings, games=["FIFA 25", "GTA V"], menu_items=menu)
+        self.ask.reset_mock()
+        self.assertTrue(self.app._save_settings(new, what="Games"))
+        self.assertFalse(self.ask.called, "games and the menu apply without a restart")
+        self.assertEqual(self.e.game_combo.cget("values"), ("— None —", "FIFA 25", "GTA V"))
+        self.assertEqual(len(self.e.item_combo.cget("values")), 2)
+
+    def pick_item(self, label_start: str, qty: str = "1"):
+        label = next(k for k in self.e._menu if k.startswith(label_start))
+        self.e.item_var.set(label)
+        self.e.item_qty_var.set(qty)
+        self.e.add_item()
+
+    def test_game_is_optional_and_snacks_change_the_amount(self):
+        e = self.e
+        self.stock_catalogue()
+        self.fill(name="NoGame", start="10:00", end="11:00")
+        e.save()
+        self.assertIsNone(self.saved()[0]["game"])
+        self.assertEqual(self.saved()[0]["items"], [])
+
+        self.fill(name="Asha", start="12:00", end="13:00")
+        e.game_var.set("FIFA 25")
+        self.assertEqual(e.total_var.get(), "80.00")
+        self.pick_item("Chips", "2")
+        self.pick_item("Cold Coffee")
+        self.assertEqual(e.total_var.get(), "180.00")
+        self.assertIn("snacks & drinks", e.price_label.cget("text"))
+        e.paid_var.set("180")
+        e.save()
+        row = next(r for r in self.saved() if r["customer_name"] == "Asha")
+        self.assertEqual((row["game"], row["total_charge_paise"]), ("FIFA 25", 18000))
+        self.assertEqual([(i["name"], i["quantity"], i["unit_price_paise"]) for i in row["items"]],
+                         [("Chips", 2, 2000), ("Cold Coffee", 1, 6000)])
+
+        # editing: snacks and drinks can be added and removed, and the amount follows
+        self.app.edit_session(row["id"])
+        self.assertEqual((e.game_var.get(), len(e._items)), ("FIFA 25", 2))
+        self.assertEqual(e.total_var.get(), "180.00")
+        self.pick_item("Chips")
+        self.assertEqual(e.total_var.get(), "200.00")
+        self.assertEqual(e.status_var.get(), "Partially Paid", "the extra balance is shown, not hidden")
+        e.items_tree.selection_set("0")
+        e.remove_item(one=True)
+        e.items_tree.selection_set("1")
+        e.remove_item()
+        self.assertEqual(e.total_var.get(), "120.00")
+        e.paid_var.set("120")
+        e.game_var.set("— None —")
+        e.update()
+        row = next(r for r in self.saved() if r["customer_name"] == "Asha")
+        self.assertEqual((row["game"], row["total_charge_paise"]), (None, 12000))
+        self.assertEqual([(i["name"], i["quantity"]) for i in row["items"]], [("Chips", 2)])
+
+    def test_menu_changes_do_not_alter_saved_sales(self):
+        import dataclasses
+
+        self.stock_catalogue()
+        self.fill(name="Asha", start="12:00", end="13:00")
+        self.pick_item("Chips")
+        self.e.paid_var.set("100")
+        self.e.save()
+        menu = [{"name": "Chips", "kind": "Snack", "price_paise": 9900}]
+        self.app._save_settings(dataclasses.replace(self.app.settings, menu_items=menu, games=[]))
+        self.assertEqual(self.saved()[0]["items"][0]["unit_price_paise"], 2000)
+        self.app.edit_session(self.saved()[0]["id"])
+        self.assertEqual(self.e.game_var.get(), "")
+        self.assertEqual(self.e.total_var.get(), "100.00")
+
+    def test_expenses_tab_and_dashboard(self):
+        x = self.app.expenses
+        x.amount_var.set("")
+        x.save()
+        self.assertTrue(self.error.called, "an amount and a note are both required")
+        x.amount_var.set("120.50")
+        x._set_note("Cold drinks restock")
+        x.save()
+        self.assertEqual(self.saved(), [])
+        data = json.loads(self.path.read_text(encoding="utf-8"))
+        self.assertEqual([(e["amount_paise"], e["note"]) for e in data["expenses"]], [(12050, "Cold drinks restock")])
+        self.assertEqual(x.total_label.cget("text"), "₹120.50")
+        self.assertEqual(len(x.table.displayed_ids()), 1)
+
+        x.table.tree.selection_set(x.table.displayed_ids()[0])
+        x.edit_selected()
+        self.assertEqual(x.amount_var.get(), "120.50")
+        x.amount_var.set("130")
+        x.save()
+        self.assertEqual(self.store.expenses[0].amount_paise, 13000)
+        self.assertEqual(len(self.store.expenses), 1)
+        self.assertEqual(self.app.dashboard.cards["expenses"][1].cget("text"), "₹130.00")
+
+    def test_dashboard_games_and_snacks(self):
+        e = self.e
+        self.stock_catalogue()
+        self.fill(name="Asha", start="10:00", end="11:00")
+        e.game_var.set("GTA V")
+        self.pick_item("Chips", "3")
+        e.paid_var.set("140")
+        e.save()
+        d = self.app.dashboard
+        self.pump()
+        self.assertEqual(d.cards["items"][1].cget("text"), "₹60.00")
+        self.assertIn("3 items", d.cards["items"][2].cget("text"))
+        self.assertEqual(d.cards["games"][1].cget("text"), "1")
+        self.assertIn("GTA V", d.cards["games"][2].cget("text"))
+        d.snack_kind_var.set("Drinks only")
+        d.snack_metric_var.set("Units Sold")
+        d.game_metric_var.set("Booked Hours")
+        self.pump()
+        self.assertEqual(d.chart_count(), 7)
+        for holder in d.holders.values():
+            self.assertEqual(len(holder.winfo_children()), 1)
+
+    def test_configurations_tabs(self):
+        import dataclasses
+
+        from ontop.ui.settings_dialog import SettingsDialog
+
+        self.fill(name="Asha", device="PS4", start="12:00", end="13:00", total="60", paid="60")
+        self.e.save()
+        saved = []
+        dialog = SettingsDialog(self.root, self.app.settings, lambda s: saved.append(s) or True,
+                                used_devices={"PS4"})
+        self.assertEqual([dialog.tabs.tab(t, "text").strip() for t in dialog.tabs.tabs()],
+                         ["General", "Devices & Prices", "Games", "Snacks & Drinks"])
+
+        dialog.game_var.set("  Mortal   Kombat ")
+        dialog._add_game()
+        dialog.game_var.set("mortal kombat")
+        dialog._add_game()
+        self.assertIn("already", dialog.error.cget("text"))
+        dialog.item_name_var.set("Lemon Soda")
+        dialog.item_kind_var.set("Drink")
+        dialog.item_price_var.set("45")
+        dialog._add_item()
+        dialog.item_price_var.set("abc")
+        dialog._add_item()
+        self.assertTrue(dialog.error.cget("text"))
+
+        dialog.device_name_var.set("Arcade")
+        self.assertEqual(dialog.device_group_var.get(), "Own prices")  # the default: a new column of its own
+        dialog._add_device()
+        # The new column starts blank: prices are typed in, never guessed from PS5/PS4.
+        self.assertEqual(dialog.rate_vars["Arcade"][1].get(), "")
+        dialog._save()
+        self.assertEqual(saved, [])
+        self.assertIn("Arcade 1-player price is required", dialog.error.cget("text"))
+        for players, price in zip((1, 2, 3, 4), ("30", "50", "70", "90")):
+            dialog.rate_vars["Arcade"][players].set(price)
+        dialog.half_vars["Arcade"].set("20")
+        dialog.device_tree.selection_set("2")  # PS4 is used by a saved session
+        dialog._remove_device()
+        self.assertIn("used by saved sessions", dialog.error.cget("text"))
+        dialog.device_name_var.set("PS4 Pro")
+        dialog._update_device()
+        self.assertIn("can't be renamed", dialog.error.cget("text"))
+
+        dialog._save()
+        self.assertEqual(len(saved), 1)
+        new = saved[0]
+        self.assertEqual(new.games, ["Mortal Kombat"])
+        self.assertEqual(new.menu_items, [{"name": "Lemon Soda", "kind": "Drink", "price_paise": 4500}])
+        self.assertEqual(new.device_names, ["PS5(X)", "PS5(Y)", "PS4", "Arcade"])
+        self.assertEqual(new.hourly_rates_paise["Arcade"], {1: 3000, 2: 5000, 3: 7000, 4: 9000})
+        self.assertEqual(new.half_hour_paise["Arcade"], 2000)
+        self.assertEqual(new.devices[-1], {"name": "Arcade", "group": "Arcade"})
+        self.assertEqual(new.problems(), [])
+        # a new device is only offered after a restart, but its prices are read live
+        self.assertTrue(self.app.settings.needs_restart(dataclasses.replace(new)))
+
+    def test_sharing_prices_and_giving_a_device_its_own_column(self):
+        from ontop.ui.settings_dialog import SettingsDialog
+
+        dialog = SettingsDialog(self.root, self.app.settings, lambda s: True)
+        self.assertEqual(dialog._groups(), ["PS5", "PS4"])
+        self.assertEqual(dialog._prices_label(0), "Same prices as PS5(Y)")
+        self.assertEqual(dialog._prices_label(2), "Own prices")
+
+        dialog.device_name_var.set("PS5(Z)")
+        dialog.device_group_var.set("Same prices as PS5(X)")
+        dialog._add_device()
+        self.assertEqual(dialog._groups(), ["PS5", "PS4"])  # no new column
+        self.assertEqual(dialog.devices[-1]["group"], "PS5")
+
+        # PS5(Y) leaves the shared column: its own column starts as a copy that can then be edited
+        dialog.device_tree.selection_set("1")
+        dialog._device_selected()
+        dialog.device_group_var.set("Own prices")
+        dialog._update_device()
+        self.assertEqual(dialog.devices[1]["group"], "PS5(Y)")
+        self.assertEqual(dialog.rate_vars["PS5(Y)"][1].get(), dialog.rate_vars["PS5"][1].get())
+        dialog.rate_vars["PS5(Y)"][1].set("99")
+
+        # a device named like an existing column still gets a unique column of its own
+        dialog.device_name_var.set("PS5")
+        dialog.device_group_var.set("Own prices")
+        dialog._add_device()
+        self.assertEqual(dialog.devices[-1]["group"], "PS5 2")
+
+        # removing a device drops its column
+        dialog.device_tree.selection_set(str(len(dialog.devices) - 1))
+        dialog._remove_device()
+        self.assertNotIn("PS5 2", dialog.rate_vars)
+        dialog.destroy()
+
+    def test_changed_prices_apply_to_new_entries_straight_away(self):
+        import dataclasses
+
+        from ontop import config
+        from ontop import settings as st
+        from ontop.pricing import suggested_charge
+
+        original = self.app.settings
+        self.addCleanup(st.apply_prices, original)
+        self.fill(name="Asha", device="PS4", start="12:00", end="13:00", paid="60")
+        self.pump()
+        self.assertEqual(self.e.total_var.get(), "60.00")
+        self.e.save()
+        self.assertEqual(self.app.store.sessions[0].total_paise, 60_00)
+
+        # a second entry is half way through being filled in when the prices change
+        self.fill(name="Ben", device="PS4", start="14:00", end="15:00")
+        self.pump()
+        self.assertEqual(self.e.total_var.get(), "60.00")
+
+        rates = {g: dict(r) for g, r in original.hourly_rates_paise.items()}
+        rates["PS4"][1] = 75_00
+        new = dataclasses.replace(original, hourly_rates_paise=rates)
+        with mock.patch("ontop.ui.dialogs.askyesno") as ask:
+            self.assertTrue(self.app._save_settings(new))
+            ask.assert_not_called()  # no restart prompt for a price change
+        self.pump()
+        self.assertEqual(suggested_charge("PS4", 1, 60), 75_00)
+        self.assertEqual(config.HOURLY_RATES_PAISE["PS4"][1], 75_00)
+        self.assertEqual(self.e.total_var.get(), "75.00")  # the open form is re-priced
+        self.e.paid_var.set("75")
+        self.e.save()
+        # the new entry uses the new price; the earlier one keeps the amount it was saved with
+        self.assertEqual(sorted(s.total_paise for s in self.app.store.sessions), [60_00, 75_00])
+
+    def test_removing_a_used_device_is_refused_on_save(self):
+        from ontop.ui.settings_dialog import SettingsDialog
+
+        self.fill(name="Asha", device="PS4", start="12:00", end="13:00", total="60", paid="60")
+        self.e.save()
+        saved = []
+        dialog = SettingsDialog(self.root, self.app.settings, lambda s: saved.append(s) or True,
+                                used_devices={"PS4"})
+        dialog.devices = [d for d in dialog.devices if d["name"] != "PS4"]
+        dialog._save()
+        self.assertEqual(saved, [])
+        self.assertIn("PS4", dialog.error.cget("text"))
+        dialog.destroy()
 
 
 @unittest.skipUnless(HAVE_DISPLAY, "no display available for Tk")

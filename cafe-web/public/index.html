@@ -14,6 +14,7 @@
     <nav aria-label="Pages">
       <a href="/" aria-current="page">Dashboard</a>
       <a href="/mapping">Session Mapping</a>
+      <a href="/expenses">Expenses</a>
     </nav>
     <div id="sync-status" class="sync" role="status"></div>
     <div class="user"><span id="user-name"></span><button id="logout" class="ghost" type="button">Sign out</button></div>
@@ -122,6 +123,38 @@
         </div>
         <div id="chart-busy" class="plot"></div>
       </div>
+      <div class="card chart">
+        <h2>Snacks &amp; drinks sales <span class="muted small">Top 10 items sold with the selected sessions</span></h2>
+        <div class="chart-controls">
+          <label>Type
+            <select id="snack-kind">
+              <option value="all">Snacks &amp; Drinks</option>
+              <option value="Snack">Snacks only</option>
+              <option value="Drink">Drinks only</option>
+            </select>
+          </label>
+          <label>Show
+            <select id="snack-metric">
+              <option value="sales">Sales (₹)</option>
+              <option value="units">Units sold</option>
+            </select>
+          </label>
+        </div>
+        <div class="legend" id="snack-legend"></div>
+        <div id="chart-snacks" class="plot ranked"></div>
+      </div>
+      <div class="card chart">
+        <h2>Games played <span class="muted small">Top 10 games named on the selected sessions</span></h2>
+        <div class="chart-controls">
+          <label>Show
+            <select id="game-metric">
+              <option value="count">Sessions</option>
+              <option value="hours">Booked hours</option>
+            </select>
+          </label>
+        </div>
+        <div id="chart-games" class="plot ranked"></div>
+      </div>
     </section>
 
     <section class="card">
@@ -133,8 +166,10 @@
               <th data-sort="start">Start</th>
               <th data-sort="customer">Customer</th>
               <th data-sort="device">Device</th>
+              <th data-sort="game">Game</th>
               <th data-sort="players" class="num">Players</th>
               <th data-sort="duration" class="num">Duration</th>
+              <th data-sort="items">Snacks &amp; drinks</th>
               <th data-sort="total" class="num">Charged</th>
               <th data-sort="paid" class="num">Paid</th>
               <th data-sort="balance" class="num">Balance</th>

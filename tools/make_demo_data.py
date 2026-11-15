@@ -21,8 +21,10 @@ from ontop.config import CLOSING_TIME, DEVICES, OPENING_TIME, PASS_DEFAULT_PRICE
 from ontop.formatting import local_datetime, now_local  # noqa: E402
 from ontop.models import (  # noqa: E402
     PAYMENT_METHODS,
+    Expense,
     Extension,
     MonthlyPass,
+    SaleItem,
     Session,
     find_conflicts,
     pass_used_minutes,
@@ -32,6 +34,12 @@ from ontop.pricing import billable_minutes, players_problem, suggested_charge  #
 from ontop.storage import SessionStore  # noqa: E402
 
 NAMES = ["Aarav", "Diya", "Kabir", "Meera", "Rohan", "Sana", "Vikram", "Ishaan", "Tara", "Zoya", "Arjun", "Nikhil"]
+GAMES = ["FIFA 24", "GTA V", "Mortal Kombat 11", "God of War", "Spider-Man 2", "Call of Duty", "Tekken 8", "NBA 2K24"]
+MENU = [  # (name, kind, price in paise)
+    ("Chips", "Snack", 2000), ("Sandwich", "Snack", 6000), ("Popcorn", "Snack", 5000), ("Cookies", "Snack", 3000),
+    ("Cold Coffee", "Drink", 8000), ("Cola", "Drink", 4000), ("Water", "Drink", 2000), ("Energy Drink", "Drink", 12000),
+]
+EXPENSE_NOTES = ["Ice and cups", "Controller batteries", "Cleaning supplies", "Tea for staff", "Printer paper", "Taxi for repair"]
 PASS_HOLDERS = [("Rahul Mehta", "9876543210"), ("Priya Shah", "9123456780"), ("Dev Patel", "9988776655")]
 
 
@@ -84,7 +92,14 @@ def main() -> int:
                     pass_used_minutes(holder.id, sessions) + billable_minutes(minutes) <= holder.included_minutes)
                 if not fits:
                     holder = None
+            # About half the sessions name a game and about a third sell snacks or drinks.
+            game = rng.choice(GAMES) if rng.random() < 0.55 else None
+            items = []
+            if rng.random() < 0.35:
+                for name, kind, price in rng.sample(MENU, rng.randint(1, 3)):
+                    items.append(SaleItem(name, kind, rng.randint(1, 3), price))
             total = suggested_charge(device, players, minutes, on_pass=holder is not None)
+            total += sum(i.amount_paise for i in items)
             paid = rng.choice((total, total, total, 0, total // 2)) if total else 0
             entered = min(start, now)
             ext = []
@@ -97,10 +112,19 @@ def main() -> int:
                 device=device, start=start, end=end.astimezone(), payment_method=rng.choice(PAYMENT_METHODS),
                 total_paise=total, paid_paise=paid, payment_status=suggest_status(total, paid), entry_time=entered,
                 last_updated=entered, extensions=ext, players=players, pass_id=holder.id if holder else None,
+                game=game, items=items,
             ))
     for s in sessions:
         store.add(s)
-    print(f"Wrote {len(sessions)} demo sessions and {len(passes)} passes to {path}")
+    expenses = []
+    for back in range(args.days, -1, -1):
+        if rng.random() < 0.4:
+            when = min(local_datetime(today - timedelta(days=back), time(rng.randint(10, 20), rng.choice((0, 30)))), now)
+            e = Expense(f"demo-expense-{len(expenses):03d}", rng.choice((5000, 12000, 25000, 40000, 75000)),
+                        rng.choice(EXPENSE_NOTES), when, when)
+            store.add_expense(e)
+            expenses.append(e)
+    print(f"Wrote {len(sessions)} demo sessions, {len(passes)} passes and {len(expenses)} expenses to {path}")
     return 0
 
 

@@ -8,13 +8,14 @@ from pathlib import Path
 from tkinter import ttk
 
 from ..formatting import fmt_datetime_long, fmt_offset, now_local
-from ..settings import AppSettings, settings_path
+from ..settings import AppSettings, apply_prices, settings_path
 from ..settings import save as save_settings
 from ..storage import SessionStore
 from . import dialogs, theme
 from .dashboard_tab import DashboardTab
 from .entries_tab import PreviousEntriesTab
 from .entry_tab import SessionEntryTab
+from .expenses_tab import ExpensesTab
 from .mapping_tab import SessionMappingTab
 from .passes_tab import PassesTab
 from .settings_dialog import SettingsDialog
@@ -62,9 +63,11 @@ class OnTopApp:
         self.entry_tabs.add(self.passes, text="Monthly Passes")
         self.entries = PreviousEntriesTab(self.notebook, self)
         self.mapping = SessionMappingTab(self.notebook, self)
+        self.expenses = ExpensesTab(self.notebook, self)
         self.notebook.add(self.entry_area, text="Session Entry")
         self.notebook.add(self.mapping, text="Session Mapping")
         self.notebook.add(self.entries, text="Previous Entries")
+        self.notebook.add(self.expenses, text="Expenses")
         self.notebook.add(self.dashboard, text="Dashboard")
         self._build_nav()
 
@@ -160,7 +163,8 @@ class OnTopApp:
         self.menu.grab_release()
 
     def open_settings(self):
-        SettingsDialog(self.root, self.settings, self._save_settings)
+        used = {s.device for s in self.store.sessions}
+        SettingsDialog(self.root, self.settings, self._save_settings, used_devices=used)
 
     def choose_theme(self, name: str):
         if name == self.settings.theme:
@@ -180,7 +184,15 @@ class OnTopApp:
         except (OSError, ValueError) as exc:
             dialogs.showerror("Could Not Save Configurations", str(exc), parent=self.root)
             return False
+        restart_needed = self.settings.needs_restart(new)
         self.settings = new
+        # Price lists, games and the menu apply straight away: new entries use the new prices from now on.
+        apply_prices(new)
+        self.entry.refresh_catalog()
+        self.entry.refresh_prices()
+        if not restart_needed:
+            self.set_status(f"{what} saved.")
+            return True
         if dialogs.askyesno(
             "Restart to apply",
             f"{what} saved. Restart the app now to apply the change?\n\n"
@@ -259,6 +271,7 @@ class OnTopApp:
         """Redraw every view from the store, keeping their filters."""
         self.entries.refresh()
         self.passes.refresh()
+        self.expenses.refresh()
         self.entry.refresh_pass()
         self.mapping.refresh()
         self.dashboard.refresh()

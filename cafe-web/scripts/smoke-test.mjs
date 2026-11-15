@@ -66,7 +66,7 @@ function session(id, { revision, start = `${day}T12:00:00+05:30`, minutes = 60, 
   check("static pages send a Content-Security-Policy", (res.headers.get("content-security-policy") || "").includes("default-src 'self'"));
   const hidden = await call("/_headers");
   check("_headers file itself is not served", hidden.res.status === 404, hidden.res.status);
-  for (const file of ["/", "/mapping", "/js/common.js", "/js/dashboard.js"]) {
+  for (const file of ["/", "/mapping", "/expenses", "/js/common.js", "/js/dashboard.js", "/js/expenses.js"]) {
     const r = await call(file);
     check(`static ${file} contains no token`, r.res.status === 200 && !r.text.includes(TOKEN), r.res.status);
   }
@@ -150,6 +150,85 @@ check("/api/me returns the user and a CSRF token", me.data?.username === USER &&
   const rows = await call(`/api/sessions?from=${day}&to=${day}&q=smoke`, { cookie });
   const a2 = rows.data?.rows?.find((r) => r.id === "smoke-a");
   check("dashboard shows the updated (not the stale) values", a2?.paid_paise === 5000 && a2?.payment_status === "Partially Paid", rows.text);
+}
+
+// ---------- games, snacks & drinks and expenses ----------
+{
+  const items = [
+    { name: "Smoke Chips", kind: "Snack", quantity: 2, unit_price_paise: 2000 },
+    { name: "Smoke Cola", kind: "Drink", quantity: 1, unit_price_paise: 4000 },
+  ];
+  const withGame = { ...session("smoke-game", { start: `${day}T20:00:00+05:30` }), game: "Smoke Game", items };
+  const base = Date.now();
+  const expense = (revision, amount, note = "Smoke test ice") => ({
+    id: "smoke-expense", revision, amount_paise: amount, note, created_at: `${day}T21:00:00+05:30`,
+    last_updated: `${day}T21:00:00+05:30`,
+  });
+  const status = (r, id, kind = "sessions") => r.data?.results?.[kind]?.[id]?.status;
+
+  const up = await call("/api/sync", { method: "POST", headers: bearer, body: { sessions: [withGame], expenses: [expense(base, 25000)] } });
+  check("sync reports api_version 2 (the desktop checks this)", up.data?.api_version === 2, up.text);
+  check("a session with a game and snacks & drinks is accepted",
+    ["inserted", "unchanged", "updated"].includes(status(up, "smoke-game")), up.text);
+  check("an expense is accepted", ["inserted", "unchanged", "updated"].includes(status(up, "smoke-expense", "expenses")), up.text);
+
+  const bad = await call("/api/sync", { method: "POST", headers: bearer, body: {
+    sessions: [
+      { ...session("smoke-bad-kind"), items: [{ name: "Meal", kind: "Meal", quantity: 1, unit_price_paise: 100 }] },
+      { ...session("smoke-bad-qty"), items: [{ name: "Chips", kind: "Snack", quantity: 0, unit_price_paise: 100 }] },
+      { ...session("smoke-bad-game"), game: "x".repeat(61) },
+    ],
+    expenses: [{ ...expense(base, 0), id: "smoke-expense-zero" }, { ...expense(base, 100, ""), id: "smoke-expense-blank" }],
+  } });
+  check("bad items, a long game name, a zero amount and a blank note are rejected",
+    ["smoke-bad-kind", "smoke-bad-qty", "smoke-bad-game"].every((id) => status(bad, id) === "invalid")
+      && ["smoke-expense-zero", "smoke-expense-blank"].every((id) => status(bad, id, "expenses") === "invalid"), bad.text);
+
+  const limit = await call("/api/sync", { method: "POST", headers: bearer, body: {
+    sessions: Array.from({ length: 20 }, (_, i) => session(`smoke-lim-${i}`)),
+    expenses: Array.from({ length: 21 }, (_, i) => ({ ...expense(base, 100), id: `smoke-lim-exp-${i}` })),
+  } });
+  check("the 40-record limit counts expenses too", limit.res.status === 413, limit.res.status);
+
+  const newer = await call("/api/sync", { method: "POST", headers: bearer, body: { expenses: [expense(base + 1, 30000)] } });
+  check("a newer expense revision updates the expense", status(newer, "smoke-expense", "expenses") === "updated", newer.text);
+  const older = await call("/api/sync", { method: "POST", headers: bearer, body: { expenses: [expense(base, 99999)] } });
+  check("an older expense revision is refused as stale", status(older, "smoke-expense", "expenses") === "stale", older.text);
+
+  const dash = await call(`/api/dashboard?from=${day}&to=${day}`, { cookie });
+  const chips = dash.data?.items?.find((i) => i.name === "Smoke Chips");
+  const cola = dash.data?.items?.find((i) => i.name === "Smoke Cola");
+  check("dashboard ranks snacks and drinks by name and kind",
+    chips?.kind === "Snack" && chips.units >= 2 && chips.sales_paise >= 4000 && cola?.kind === "Drink" && cola.sales_paise >= 4000, dash.text);
+  check("dashboard ranks games", dash.data?.games?.some((g) => g.name === "Smoke Game" && g.sessions >= 1), dash.text);
+  check("summary has snack money, units and game sessions",
+    dash.data?.summary?.items_paise >= 8000 && dash.data.summary.items_units >= 3 && dash.data.summary.game_sessions >= 1, dash.text);
+  check("summary has the expense total", dash.data?.summary?.expense_paise >= 30000 && dash.data.summary.expense_count >= 1, dash.text);
+
+  const rows = await call(`/api/sessions?from=${day}&to=${day}&sort=game&dir=desc`, { cookie });
+  const row = rows.data?.rows?.find((r) => r.id === "smoke-game");
+  check("history rows carry the game and a parsed items list (never the raw JSON)",
+    row?.game === "Smoke Game" && row.items?.length === 2 && row.items[0].quantity === 2 && !("items_json" in row), rows.text);
+  const plain = rows.data?.rows?.find((r) => r.id === "smoke-c");
+  check("sessions sent without a game or items show no game and an empty list",
+    plain && plain.game === null && Array.isArray(plain.items) && plain.items.length === 0, rows.text);
+  const map = await call(`/api/mapping?date=${day}`, { cookie });
+  check("mapping sessions carry game and items", map.data?.sessions?.find((s) => s.id === "smoke-game")?.items?.length === 2, map.text);
+
+  const list = await call(`/api/expenses?from=${day}&to=${day}&q=smoke%20test`, { cookie });
+  const e = list.data?.rows?.find((r) => r.id === "smoke-expense");
+  check("expenses list shows the latest amount and note",
+    e?.amount_paise === 30000 && e.note === "Smoke test ice" && e.spent_on === day && list.data.total_paise >= 30000, list.text);
+  const none = await call(`/api/expenses?from=${day}&to=${day}&q=nothing-matches-this`, { cookie });
+  check("expenses note search filters", none.data?.total === 0 && none.data.total_paise === 0, none.text);
+  const wild = await call(`/api/expenses?from=${day}&to=${day}&q=%25`, { cookie });
+  check("a % in the note search is matched literally", wild.data?.total === 0, wild.text);
+  const all = await call("/api/expenses?all=1&sort=amount&dir=asc&page_size=5", { cookie });
+  check("expenses support all-time, sorting and paging", all.res.status === 200 && all.data.page_size === 5 && all.data.sort === "amount", all.text);
+  const anon = await call("/api/expenses");
+  check("expenses API needs sign-in", anon.res.status === 401, anon.res.status);
+  const page = await call("/expenses");
+  check("expenses page is served and holds no token", page.res.status === 200 && !page.text.includes(TOKEN), page.res.status);
 }
 
 // ---------- dashboard APIs ----------

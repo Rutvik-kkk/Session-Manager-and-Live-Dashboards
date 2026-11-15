@@ -1,6 +1,10 @@
 -- On Top Gaming online dashboard — initial D1 schema.
 -- Non-destructive: every statement uses IF NOT EXISTS / OR IGNORE, so running this file again
 -- (locally or against production) never drops or overwrites data.
+--
+-- Later changes (games, snacks & drinks, expenses, ...) live in migrations/ and are applied with
+-- `npm run db:migrate:local` / `npm run db:migrate:remote` after this file. Do not edit the tables
+-- below to add them: the migrations add those columns, and adding them twice would fail.
 
 -- Website accounts. Created only with scripts/create-admin.mjs; there is no public registration.
 CREATE TABLE IF NOT EXISTS users (

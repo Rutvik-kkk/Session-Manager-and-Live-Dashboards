@@ -25,7 +25,8 @@ class FakeServer:
 
     def __init__(self):
         self.dataset_id = "dataset-1"
-        self.rows = {"sessions": {}, "passes": {}}
+        self.rows = {"sessions": {}, "passes": {}, "expenses": {}}
+        self.api_version = sync.API_VERSION
         self.requests: list[dict] = []
         self.fail_next: list[Exception] = []
 
@@ -34,9 +35,9 @@ class FakeServer:
             raise self.fail_next.pop(0)
         assert url == URL + "/api/sync" and token == TOKEN
         self.requests.append(json.loads(json.dumps(body)))
-        assert len(body["sessions"]) + len(body["passes"]) <= 40
-        results = {"sessions": {}, "passes": {}}
-        for kind in ("sessions", "passes"):
+        assert len(body["sessions"]) + len(body["passes"]) + len(body["expenses"]) <= 40
+        results = {"sessions": {}, "passes": {}, "expenses": {}}
+        for kind in ("sessions", "passes", "expenses"):
             for record in body[kind]:
                 content = {k: v for k, v in record.items() if k != "revision"}
                 old = self.rows[kind].get(record["id"])
@@ -52,11 +53,12 @@ class FakeServer:
                 if old is None or record["revision"] > old["revision"]:
                     self.rows[kind][record["id"]] = {"revision": record["revision"], "content": content}
                 results[kind][record["id"]] = {"status": status}
-        return {"dataset_id": self.dataset_id, "results": results, "final": body["final"]}
+        return {"dataset_id": self.dataset_id, "results": results, "final": body["final"],
+                "api_version": self.api_version}
 
     def sent_ids(self, index=-1):
         r = self.requests[index]
-        return {x["id"] for x in r["sessions"] + r["passes"]}
+        return {x["id"] for x in r["sessions"] + r["passes"] + r["expenses"]}
 
 
 class ConfigTests(unittest.TestCase):
@@ -127,6 +129,47 @@ class RunSyncTests(unittest.TestCase):
         row = self.server.rows["sessions"][changed.id]
         self.assertEqual(row["content"]["payment_status"], "Unpaid")
         self.assertGreater(row["revision"], sync.revision_base(sync.session_payload(self.sessions[3])))
+
+    def test_games_snacks_and_expenses_are_uploaded(self):
+        from ontop.models import SaleItem, prepare_expense
+
+        item = SaleItem("Chips", "Snack", 2, 2000)
+        with_extras = make(name="Extra", start="9:00", end="10:00", total="240", paid="240", game="FIFA 25",
+                           items=[item])
+        expense = prepare_expense(amount_text="75.50", note_text="Ice for the drinks", now=NOW)
+        snap = sync.take_snapshot([with_extras], [], [expense])
+        state = sync.SyncState.load(self.state_path)
+        result = sync.run_sync(snap, self.config, state, transport=self.server, delays=(0, 0, 0))
+        self.assertTrue(result.ok)
+        self.assertEqual(result.stored, 2)
+        sent = self.server.requests[0]
+        self.assertEqual((sent["sessions"][0]["game"], sent["sessions"][0]["items"]),
+                         ("FIFA 25", [{"name": "Chips", "kind": "Snack", "quantity": 2, "unit_price_paise": 2000}]))
+        self.assertEqual({k: v for k, v in sent["expenses"][0].items() if k != "revision"},
+                         sync.expense_payload(expense))
+        self.assertEqual(sync.expense_payload(expense)["amount_paise"], 7550)
+
+        sync.run_sync(snap, self.config, sync.SyncState.load(self.state_path), transport=self.server,
+                      delays=(0, 0, 0))
+        self.assertEqual(self.server.requests[-1]["expenses"], [], "unchanged expenses are not sent again")
+
+        edited = prepare_expense(amount_text="80", note_text="Ice for the drinks", now=NOW + timedelta(minutes=5),
+                                 existing=expense)
+        sync.run_sync(sync.take_snapshot([with_extras], [], [edited]), self.config,
+                      sync.SyncState.load(self.state_path), transport=self.server, delays=(0, 0, 0))
+        self.assertEqual(self.server.sent_ids(), {expense.id})
+        self.assertEqual(self.server.rows["expenses"][expense.id]["content"]["amount_paise"], 8000)
+
+    def test_an_outdated_dashboard_is_refused_not_trusted(self):
+        self.server.api_version = 1
+        with self.assertRaises(sync.SyncError) as ctx:
+            self.run_sync()
+        self.assertIn("out of date", str(ctx.exception))
+        state = sync.SyncState.load(self.state_path)
+        self.assertFalse(any(e.get("acked") for kind in state.records.values() for e in kind.values()))
+        self.server.api_version = sync.API_VERSION
+        self.assertTrue(self.run_sync().ok)
+        self.assertEqual(len(self.server.rows["sessions"]), 20)
 
     def test_session_ids_are_preserved(self):
         self.run_sync()
@@ -214,6 +257,7 @@ class ControllerTests(unittest.TestCase):
         class Store:
             sessions = [make()]
             passes = []
+            expenses = []
 
         state = Path(self.tmp.name) / sync.STATE_FILE
         config = sync.SyncConfig(URL, TOKEN)

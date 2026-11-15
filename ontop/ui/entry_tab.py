@@ -7,7 +7,7 @@ from datetime import timedelta
 from tkinter import ttk
 from typing import TYPE_CHECKING
 
-from ..config import CLOSING_TIME, DEVICES, OPENING_TIME, PLAYER_COUNTS
+from ..config import CLOSING_TIME, DEVICES, MAX_ITEM_QUANTITY, OPENING_TIME, PLAYER_COUNTS
 from ..formatting import (
     fmt_clock,
     fmt_date,
@@ -33,6 +33,7 @@ from ..models import (
     ConflictError,
     Extension,
     MonthlyPass,
+    SaleItem,
     Session,
     ValidationError,
     active_pass_for_phone,
@@ -42,8 +43,11 @@ from ..models import (
     duration_between,
     duration_minutes_problem,
     find_conflicts,
+    fmt_items,
     fmt_phone,
+    items_total,
     max_minutes_until_close,
+    merge_items,
     normalise_notes,
     normalise_phone,
     opening_hours_text,
@@ -61,6 +65,7 @@ if TYPE_CHECKING:
     from .app import OnTopApp
 
 DEFAULT_DURATION_MINUTES = 60
+NO_GAME = "— None —"
 
 
 def bullet_list(errors: list[str]) -> str:
@@ -76,7 +81,12 @@ class SessionEntryTab(ttk.Frame):
         self._pending: list[Extension] = []
         self._pass: MonthlyPass | None = None
         self._amount_auto = True
+        self._items: list[SaleItem] = []
+        self._menu: dict[str, dict] = {}  # combobox text -> menu item
 
+        self.game_var = tk.StringVar()
+        self.item_var = tk.StringVar()
+        self.item_qty_var = tk.StringVar(value="1")
         self.pass_var = tk.BooleanVar(value=False)
         self.phone_var = tk.StringVar()
         self.name_var = tk.StringVar()
@@ -139,6 +149,7 @@ class SessionEntryTab(ttk.Frame):
         self._build_timing(self.left)
         self._build_payment(self.right)
         self._build_extend(self.right)
+        self._build_snacks(self.right)
 
         self._stacked: bool | None = None
         self.columns.bind("<Configure>", self._on_resize)
@@ -202,7 +213,11 @@ class SessionEntryTab(ttk.Frame):
         self.players_combo.grid(row=7, column=1, sticky="w", pady=4)
         ttk.Label(f, text="2–4 players: minimum 1 hour", style="CardSmall.TLabel").grid(
             row=7, column=2, columnspan=2, sticky="w", padx=8)
-        self._build_notes(f, 8)
+        self._field_label(f, "Game", 8)
+        self.game_combo = ttk.Combobox(f, textvariable=self.game_var, state="readonly", width=30)
+        self.game_combo.grid(row=8, column=1, columnspan=2, sticky="w", pady=4)
+        ttk.Label(f, text="Optional", style="CardSmall.TLabel").grid(row=8, column=3, sticky="w", padx=8)
+        self._build_notes(f, 9)
 
     def _build_timing(self, parent):
         f = self._section(parent, "Timing",
@@ -350,6 +365,136 @@ class SessionEntryTab(ttk.Frame):
         self.history.tag_configure("pending", foreground=theme.WARNING)
         self.history.grid(row=5, column=0, columnspan=4, sticky="ew", pady=(4, 0))
 
+    def _build_snacks(self, parent):
+        f = self._section(
+            parent,
+            "Snacks & drinks",
+            "Pick an item from the menu and add it. The price is saved with the item and added to the payment "
+            "amount. Edit the menu in Configurations.",
+        )
+        row = ttk.Frame(f, style="Inner.TFrame")
+        row.grid(row=2, column=0, columnspan=4, sticky="ew", pady=(10, 4))
+        row.columnconfigure(0, weight=1)
+        self.item_combo = ttk.Combobox(row, textvariable=self.item_var, state="readonly", width=32)
+        self.item_combo.grid(row=0, column=0, sticky="ew")
+        ttk.Label(row, text="Qty", style="CardMuted.TLabel").grid(row=0, column=1, padx=(10, 4))
+        qty = ttk.Entry(row, textvariable=self.item_qty_var, width=4, justify="center")
+        qty.grid(row=0, column=2)
+        qty.bind("<Return>", lambda e: self.add_item())
+        self.add_item_btn = ttk.Button(row, text="Add", style="Accent.TButton", command=self.add_item)
+        self.add_item_btn.grid(row=0, column=3, padx=(8, 0))
+
+        self.item_msg = ttk.Label(f, style="CardMuted.TLabel", wraplength=480, justify="left")
+        self.item_msg.grid(row=3, column=0, columnspan=4, sticky="w", pady=(2, 6))
+
+        cols = ("name", "kind", "qty", "price", "amount")
+        self.items_tree = ttk.Treeview(f, columns=cols, show="headings", height=4, selectmode="browse")
+        for key, text, width, anchor in (("name", "Item", 170, "w"), ("kind", "Type", 60, "w"),
+                                         ("qty", "Qty", 40, "center"), ("price", "Price", 80, "e"),
+                                         ("amount", "Amount", 90, "e")):
+            self.items_tree.heading(key, text=text)
+            self.items_tree.column(key, width=width, anchor=anchor, stretch=key == "name")
+        self.items_tree.grid(row=4, column=0, columnspan=4, sticky="ew")
+        foot = ttk.Frame(f, style="Inner.TFrame")
+        foot.grid(row=5, column=0, columnspan=4, sticky="ew", pady=(8, 0))
+        ttk.Button(foot, text="Remove selected", style="Small.TButton", command=self.remove_item).pack(side="left")
+        ttk.Button(foot, text="One less", style="Small.TButton", command=lambda: self.remove_item(one=True)).pack(
+            side="left", padx=(6, 0))
+        self.items_total_label = ttk.Label(foot, style="CardSection.TLabel")
+        self.items_total_label.pack(side="right")
+        self.refresh_catalog()
+
+    # -- games and the snack/drink menu (edited in Configurations, read live) --
+
+    def refresh_catalog(self):
+        """Reload the game list and the menu from the settings, keeping what is currently chosen."""
+        settings = self.app.settings
+        games = list(settings.games)
+        current = self.game_var.get()
+        if current and current != NO_GAME and current not in games:
+            games.append(current)  # a game removed from the list later still shows on old sessions
+        self.game_combo.configure(values=[NO_GAME, *games])
+        self._menu = {}
+        for item in settings.menu_items:
+            self._menu[f"{item['name']} · {item['kind']} · {fmt_money(item['price_paise'])}"] = item
+        self.item_combo.configure(values=list(self._menu))
+        if self.item_var.get() not in self._menu:
+            self.item_var.set("")
+        if self._menu:
+            # (clears any "menu is empty" hint left from before)
+            self.item_msg.configure(text="", style="CardMuted.TLabel")
+        else:
+            self.item_msg.configure(
+                text="The menu is empty. Add snacks and drinks under Configurations ▸ Snacks & Drinks.",
+                style="CardWarn.TLabel")
+        self.add_item_btn.configure(state="normal" if self._menu else "disabled")
+
+    def refresh_prices(self):
+        """The price lists changed: re-price a new session that is still being filled in.
+
+        A session being edited keeps the amount it was saved with unless the user changes it.
+        """
+        if not self.is_editing():
+            self._update_price(auto_amount=True)
+
+    def _game(self) -> str | None:
+        game = self.game_var.get().strip()
+        return None if game in ("", NO_GAME) else game
+
+    def _render_items(self):
+        self.items_tree.delete(*self.items_tree.get_children())
+        for index, item in enumerate(self._items):
+            self.items_tree.insert("", "end", iid=str(index), values=(
+                item.name, item.kind, item.quantity, fmt_money(item.unit_paise), fmt_money(item.amount_paise)))
+        total = items_total(self._items)
+        self.items_total_label.configure(text=f"Snacks & drinks: {fmt_money(total)}" if self._items else "")
+        if not self._items:
+            self.items_tree.insert("", "end", iid="empty", values=("No snacks or drinks added", "", "", "", ""))
+
+    def _set_items(self, items):
+        self._items = list(items)
+        self._render_items()
+
+    def add_item(self):
+        def fail(text: str):
+            self.item_msg.configure(text=text, style="CardError.TLabel")
+
+        menu_item = self._menu.get(self.item_var.get())
+        if menu_item is None:
+            fail("Choose an item from the menu first.")
+            return
+        raw = self.item_qty_var.get().strip()
+        if not raw.isdigit() or not 1 <= int(raw) <= MAX_ITEM_QUANTITY:
+            fail(f"Quantity must be a whole number from 1 to {MAX_ITEM_QUANTITY}.")
+            return
+        line = SaleItem(menu_item["name"], menu_item["kind"], int(raw), menu_item["price_paise"])
+        merged = merge_items([*self._items, line])
+        if any(i.quantity > MAX_ITEM_QUANTITY for i in merged):
+            fail(f"At most {MAX_ITEM_QUANTITY} of one item can be added to a session.")
+            return
+        self._set_items(merged)
+        self.item_qty_var.set("1")
+        self.item_msg.configure(text=f"Added {line.quantity} × {line.name} ({fmt_money(line.amount_paise)}).",
+                                style="CardOk.TLabel")
+        self._update_price(auto_amount=True)
+
+    def remove_item(self, one: bool = False):
+        selected = self.items_tree.selection()
+        if not selected or not selected[0].isdigit():
+            self.item_msg.configure(text="Select an item in the list first.", style="CardWarn.TLabel")
+            return
+        index = int(selected[0])
+        item = self._items[index]
+        items = list(self._items)
+        if one and item.quantity > 1:
+            items[index] = SaleItem(item.name, item.kind, item.quantity - 1, item.unit_paise)
+        else:
+            del items[index]
+        self._set_items(items)
+        what = f"one {item.name}" if one and item.quantity > 1 else item.name
+        self.item_msg.configure(text=f"Removed {what}.", style="CardMuted.TLabel")
+        self._update_price(auto_amount=True)
+
     def _build_actions(self, parent):
         bar = ttk.Frame(parent)
         bar.pack(side="right")
@@ -440,9 +585,14 @@ class SessionEntryTab(ttk.Frame):
             self.total_var.set("")
             self.paid_var.set("0")
             self.status_var.set("")
+            self.game_var.set("")
+            self.item_var.set("")
+            self.item_qty_var.set("1")
         finally:
             self._syncing = False
         self._set_notes("")
+        self._set_items([])
+        self.refresh_catalog()
         self.extend_msg.configure(text="", style="CardMuted.TLabel")
         self._recalc_from_times()
         self._render_history()
@@ -475,7 +625,7 @@ class SessionEntryTab(ttk.Frame):
         self._pending = []
         self._pass = self.app.store.get_pass(session.pass_id)
         on_pass = self._pass is not None
-        self._amount_auto = session.total_paise == suggested_charge(
+        self._amount_auto = session.total_paise == session.items_paise + suggested_charge(
             session.device, session.players, session.duration_minutes, on_pass)
         start, end = to_local(session.start), to_local(session.end)
         self._syncing = True
@@ -494,9 +644,14 @@ class SessionEntryTab(ttk.Frame):
             self.total_var.set(paise_to_input(session.total_paise))
             self.paid_var.set(paise_to_input(session.paid_paise))
             self.status_var.set(session.payment_status)
+            self.game_var.set(session.game or "")
+            self.item_var.set("")
+            self.item_qty_var.set("1")
         finally:
             self._syncing = False
         self._set_notes(session.notes)
+        self._set_items(session.items)
+        self.refresh_catalog()
         self.extend_msg.configure(text="", style="CardMuted.TLabel")
         try:
             span = self._current_times()
@@ -760,7 +915,11 @@ class SessionEntryTab(ttk.Frame):
             return None, problem
         on_pass = self._pass is not None and self.pass_var.get()
         amount = suggested_charge(device, players, minutes, on_pass)
-        return amount, charge_explanation(device, players, minutes, on_pass)
+        explanation = charge_explanation(device, players, minutes, on_pass)
+        extras = items_total(self._items)
+        if extras:
+            explanation += f" + snacks & drinks {fmt_money(extras)}"
+        return amount + extras, explanation
 
     def _update_price(self, auto_amount: bool):
         amount, explanation = self._suggestion()
@@ -947,6 +1106,8 @@ class SessionEntryTab(ttk.Frame):
             monthly_pass=monthly_pass,
             pass_used_by_others=used,
             notes_text=self._notes(),
+            game=self._game(),
+            items=self._items,
         )
 
     def _persist(self, updating: bool) -> Session | None:
@@ -981,6 +1142,10 @@ class SessionEntryTab(ttk.Frame):
                 f"{fmt_range(session.start, session.end)} ({fmt_duration(session.duration_minutes)})\n"
                 f"Charge {fmt_money(session.total_paise)} · Paid {fmt_money(session.paid_paise)} · "
                 f"{session.payment_status}")
+        if session.game:
+            text += f"\nGame: {session.game}"
+        if session.items:
+            text += f"\nSnacks & drinks: {fmt_items(session.items)} ({fmt_money(session.items_paise)})"
         if session.pass_id:
             p = self.app.store.get_pass(session.pass_id)
             left = p.included_minutes - self.app.store.pass_used_minutes(p.id)

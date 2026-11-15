@@ -2,13 +2,15 @@
 
 A read-only web dashboard for the desktop Session Manager. The desktop app (`main.py`) uploads new and
 changed sessions to this Cloudflare Worker; the owner logs in from any browser to see cards, charts,
-filters, sortable session history and a daily session-mapping page.
+filters, sortable session history, games and snacks & drinks charts, employee expenses and a daily
+session-mapping page.
 
 - **Worker** (TypeScript, `src/`) — the JSON API under `/api/*`.
 - **Workers Static Assets** (`public/`) — the HTML/CSS/JavaScript site. It contains no customer data,
   tokens or credentials; everything private comes from the authenticated API.
 - **D1** (database `ontop-gaming-db`, binding `DB`) — users, login sessions, login attempts, uploaded
-  sessions and passes, and sync metadata. Schema: `schema.sql`.
+  sessions (with game and snacks & drinks), passes, employee expenses, and sync metadata. Schema: `schema.sql`
+  plus the files in `migrations/`.
 
 | Name | Value |
 |---|---|
@@ -48,7 +50,11 @@ All commands below are run from the `cafe-web` folder.
 
    ```bash
    npm run db:init:local
+   npm run db:migrate:local
    ```
+
+   `db:migrate:local` applies the files in `migrations/` (games, snacks & drinks and expenses). Wrangler records
+   which ones have run, so running it again does nothing.
 
 4. Create the website login. The script asks for a username and a password (hidden while typing), hashes
    the password and stores only the hash:
@@ -128,6 +134,7 @@ Complete the local testing first. Then:
 
    ```bash
    npm run db:init:remote
+   npm run db:migrate:remote
    ```
 
 4. Set the production upload token. Generate a **new** value (do not reuse the local one, a website
@@ -170,6 +177,34 @@ Complete the local testing first. Then:
 To redeploy after code changes, run `npm run deploy` again. Re-running `npm run db:init:remote` is safe;
 it never drops or replaces data.
 
+### Updating a site that is already running (games, snacks & drinks, expenses)
+
+Do these in order. The new Worker reads columns and a table that only exist after the migration, so the
+migration must come first:
+
+1. `npm run db:migrate:remote` — adds the `game`, `items_json`, `items_paise` and `items_units` columns to
+   `cafe_sessions` and creates `cafe_expenses`. Existing rows are kept (older sessions simply have no game
+   or snacks).
+2. `npm run check`, then `npm run deploy`.
+3. Update and restart the desktop app. It checks the Worker's `api_version`; against an older Worker it shows
+   "The online dashboard is out of date" and keeps everything queued rather than losing games, snacks or
+   expenses. After the first successful sync every session is re-sent once so it gains its game and snacks.
+
+If the new Worker is deployed before the migration, the dashboard returns errors until the migration is
+applied; nothing is lost.
+
+### Starting from real data (erasing demo or test records)
+
+`npm run db:clear:remote` deletes every session, pass and expense on the live website and forgets the stored
+café settings, so you can start clean. It keeps the website logins and the `SYNC_TOKEN`. It cannot be undone.
+It also gives the database a new id: the next time the desktop app syncs, it notices and re-uploads everything it
+holds (the desktop's own records are never touched). So:
+
+1. Make sure the desktop app you will use for real is pointed at its real `data\` folder (not a demo one).
+2. `npm run db:clear:remote` (answer `y` to the Wrangler prompt).
+3. Start the desktop app or press **Sync Now**. Open the website and refresh: only the real data remains.
+
+Use `npm run db:clear:local` for the local test database.
 ### Managing logins
 
 There is no public registration. Use the same script for every account change:
@@ -209,8 +244,9 @@ Until both match, the app shows "sync token rejected" and keeps its changes queu
 - If the D1 database is recreated (new `dataset_id`) or the URL changes, the app re-uploads everything automatically.
 - HTTPS is required (except for localhost), redirects are refused, and the token is only sent in the
   `Authorization: Bearer` header.
-- What is uploaded: session times, device, players, customer name, amounts, payment method and status, and pass
-  hours and validity. **Not uploaded:** session notes and pass holders' names and phone numbers.
+- What is uploaded: session times, device, players, customer name, game, snacks & drinks (name, kind, quantity,
+  price each), amounts, payment method and status, pass hours and validity, and employee expenses (amount, note
+  and when it was entered). Expenses count toward the 40-record limit like sessions. **Not uploaded:** session notes and pass holders' names and phone numbers.
 
 ### Website security
 
@@ -237,6 +273,14 @@ Until both match, the app shows "sync token rejected" and keeps its changes queu
   Device comparison (count / hours / charges, sortable), Payment methods and Busy hours (sessions playing during
   each hour, with its own This week / This month / This year / All time period). Date ranges include This week,
   This year and All time, and charts can be grouped by day, week or month; long ranges are drawn as lines.
+- **Snacks & drinks sales** and **Games played** are ranked bar charts (top 10) like the desktop ones. Snacks &
+  drinks can be limited to snacks or drinks and shown as sales (₹) or units; games as sessions or booked hours.
+  Three extra cards show snacks & drinks sales (already part of the session charges), games played and employee
+  expenses. The session history has Game and Snacks & drinks columns.
+- The **Expenses** page lists what employees spent (date, amount, note) with the same date presets, a note
+  search, sorting and paging. It is read-only: expenses are entered and corrected in the desktop app. The
+  dashboard's expenses card follows only the date range, not the device, payment or customer filters.
+- On the Session Mapping page, select a booking (tap, or Tab then Enter) to see its game and snacks & drinks.
 - On phones, the Session Mapping timeline keeps a readable width per hour and scrolls sideways, with the device
   names pinned; it opens at the current time (today) or the first session.
 - All times are shown in Asia/Kolkata (IST). Daily grouping and the mapping page use IST calendar days.
@@ -250,13 +294,14 @@ Until both match, the app shows "sync token rejected" and keeps its changes queu
 
 ```
 wrangler.jsonc          Worker, static assets and D1 configuration
-schema.sql              non-destructive schema (safe to run repeatedly)
+schema.sql              non-destructive base schema (safe to run repeatedly)
+migrations/             later database changes, applied with npm run db:migrate:local / :remote
 src/index.ts            routing
 src/auth.ts             login, logout, cookies, rate limiting
 src/sync.ts             POST /api/sync for the desktop app
-src/dashboard.ts        dashboard, session list, mapping and status APIs
+src/dashboard.ts        dashboard, session list, expenses, mapping and status APIs
 src/util.ts             JSON responses, headers, crypto and date helpers
-public/                 static website (login, dashboard, mapping, 404)
+public/                 static website (login, dashboard, mapping, expenses, 404)
 scripts/create-admin.mjs  create or reset a website login
 scripts/smoke-test.mjs  local end-to-end checks
 .dev.vars.example       local SYNC_TOKEN template (copy to .dev.vars)

@@ -14,6 +14,7 @@ from .config import LEGACY_DEVICE_NAMES
 from .formatting import fmt_date_long, fmt_duration
 from .models import (
     ConflictError,
+    Expense,
     MonthlyPass,
     Session,
     ValidationError,
@@ -25,8 +26,8 @@ from .models import (
 )
 from .pricing import players_problem
 
-SCHEMA_VERSION = 2
-READABLE_VERSIONS = (1, 2)
+SCHEMA_VERSION = 3
+READABLE_VERSIONS = (1, 2, 3)
 MAX_REPORTED_PROBLEMS = 12
 
 
@@ -89,8 +90,10 @@ class SessionStore:
         self.path = Path(path)
         self._sessions: dict[str, Session] = {}
         self._passes: dict[str, MonthlyPass] = {}
+        self._expenses: dict[str, Expense] = {}
         self.load_error: str | None = None
         self.upgraded_from: int | None = None
+        self.source_version: int | None = None  # schema version of the file as loaded
         self._fingerprint: tuple[int, int] | None = None
 
     # -- state -----------------------------------------------------------
@@ -107,6 +110,14 @@ class SessionStore:
     def passes(self) -> list[MonthlyPass]:
         return [p.copy() for p in self._passes.values()]
 
+    @property
+    def expenses(self) -> list[Expense]:
+        return [e.copy() for e in self._expenses.values()]
+
+    def get_expense(self, expense_id: str | None) -> Expense | None:
+        e = self._expenses.get(expense_id) if expense_id else None
+        return e.copy() if e else None
+
     def get(self, session_id: str) -> Session | None:
         s = self._sessions.get(session_id)
         return s.copy() if s else None
@@ -120,7 +131,9 @@ class SessionStore:
 
     @property
     def backup_path(self) -> Path:
-        return self.path.with_name(self.path.stem + ".v1-backup.json")
+        """Where the file as it was before upgrading is kept (one backup per old schema version)."""
+        version = self.source_version if self.source_version in (1, 2) else 1
+        return self.path.with_name(f"{self.path.stem}.v{version}-backup.json")
 
     # -- loading ---------------------------------------------------------
 
@@ -133,8 +146,10 @@ class SessionStore:
         """
         self._sessions = {}
         self._passes = {}
+        self._expenses = {}
         self.load_error = None
         self.upgraded_from = None
+        self.source_version = None
         self._fingerprint = None
         try:
             self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -144,7 +159,7 @@ class SessionStore:
 
         if not self.path.exists():
             try:
-                self._write({}, {})
+                self._write({}, {}, {})
             except StorageError as exc:
                 self.load_error = str(exc)
             return
@@ -182,9 +197,15 @@ class SessionStore:
         if not isinstance(pass_records, list):
             self.load_error = f"{self.path} has a 'passes' value that is not a list."
             return
+        expense_records = data.get("expenses", []) if version >= 3 else []
+        if not isinstance(expense_records, list):
+            self.load_error = f"{self.path} has an 'expenses' value that is not a list."
+            return
+        self.source_version = version
+        if version < SCHEMA_VERSION:
+            self.upgraded_from = version
         if version == 1:
             records = [_upgrade_v1_session(r) for r in records]
-            self.upgraded_from = 1
 
         problems: list[str] = []
         for index, record in enumerate(pass_records, start=1):
@@ -200,6 +221,18 @@ class SessionStore:
                 problems.append(f"{label}: duplicate pass id")
                 continue
             self._passes[p.id] = p
+
+        for index, record in enumerate(expense_records, start=1):
+            label = f"Expense #{index}"
+            try:
+                expense = Expense.from_dict(record)
+            except ValueError as exc:
+                problems.append(f"{label}: {exc}")
+                continue
+            if expense.id in self._expenses:
+                problems.append(f"{label}: duplicate expense id")
+                continue
+            self._expenses[expense.id] = expense
 
         for index, record in enumerate(records, start=1):
             label = f"Record #{index}"
@@ -224,7 +257,7 @@ class SessionStore:
             text = "\n".join(f"• {p}" for p in shown)
             if more:
                 text += f"\n• …and {more} more"
-            total = len(records) + len(pass_records)
+            total = len(records) + len(pass_records) + len(expense_records)
             self.load_error = f"{len(problems)} of {total} saved record(s) in {self.path} are invalid:\n{text}"
 
     # -- session changes -------------------------------------------------
@@ -235,7 +268,7 @@ class SessionStore:
         self._check_session(session, None)
         updated = dict(self._sessions)
         updated[session.id] = session.copy()
-        self._commit(updated, self._passes)
+        self._commit(updated, self._passes, self._expenses)
 
     def update(self, session: Session) -> None:
         existing = self._sessions.get(session.id)
@@ -246,7 +279,7 @@ class SessionStore:
         self._check_session(session, existing)
         updated = dict(self._sessions)
         updated[session.id] = session.copy()
-        self._commit(updated, self._passes)
+        self._commit(updated, self._passes, self._expenses)
 
     def _check_session(self, session: Session, existing: Session | None) -> None:
         problems = session.problems()
@@ -286,7 +319,7 @@ class SessionStore:
         self._check_pass(p)
         updated = dict(self._passes)
         updated[p.id] = p.copy()
-        self._commit(self._sessions, updated)
+        self._commit(self._sessions, updated, self._expenses)
 
     def update_pass(self, p: MonthlyPass) -> None:
         existing = self._passes.get(p.id)
@@ -304,7 +337,7 @@ class SessionStore:
             ])
         updated = dict(self._passes)
         updated[p.id] = p.copy()
-        self._commit(self._sessions, updated)
+        self._commit(self._sessions, updated, self._expenses)
 
     def _check_pass(self, p: MonthlyPass) -> None:
         problems = p.problems()
@@ -323,9 +356,37 @@ class SessionStore:
                     f"or after {fmt_date_long(other.valid_until)}."
                 ])
 
+    # -- expense changes -------------------------------------------------
+
+    def add_expense(self, expense: Expense) -> None:
+        if expense.id in self._expenses:
+            raise StorageError("An expense with this id already exists; use update instead.")
+        self._check_expense(expense)
+        updated = dict(self._expenses)
+        updated[expense.id] = expense.copy()
+        self._commit(self._sessions, self._passes, updated)
+
+    def update_expense(self, expense: Expense) -> None:
+        existing = self._expenses.get(expense.id)
+        if existing is None:
+            raise StorageError("This expense no longer exists in the data file.")
+        if expense.created_at != existing.created_at:
+            raise StorageError("The entry time of an expense cannot be changed.")
+        self._check_expense(expense)
+        updated = dict(self._expenses)
+        updated[expense.id] = expense.copy()
+        self._commit(self._sessions, self._passes, updated)
+
+    @staticmethod
+    def _check_expense(expense: Expense) -> None:
+        problems = expense.problems()
+        if problems:
+            raise ValidationError(problems)
+
     # -- file IO ---------------------------------------------------------
 
-    def _commit(self, sessions: dict[str, Session], passes: dict[str, MonthlyPass]) -> None:
+    def _commit(self, sessions: dict[str, Session], passes: dict[str, MonthlyPass],
+                expenses: dict[str, Expense]) -> None:
         if self.read_only:
             raise StorageError(
                 "Saving is disabled because the data file could not be loaded safely. "
@@ -345,9 +406,10 @@ class SessionStore:
                     f"Could not back up the old-format data file to {self.backup_path} before upgrading it: "
                     f"{exc.strerror or exc}"
                 ) from exc
-        self._write(sessions, passes)
+        self._write(sessions, passes, expenses)
         self._sessions = dict(sessions)
         self._passes = dict(passes)
+        self._expenses = dict(expenses)
         self.upgraded_from = None
 
     def _stat(self) -> tuple[int, int] | None:
@@ -357,11 +419,13 @@ class SessionStore:
             return None
         return st.st_mtime_ns, st.st_size
 
-    def _write(self, sessions: dict[str, Session], passes: dict[str, MonthlyPass]) -> None:
+    def _write(self, sessions: dict[str, Session], passes: dict[str, MonthlyPass],
+               expenses: dict[str, Expense]) -> None:
         payload = {
             "schema_version": SCHEMA_VERSION,
             "sessions": [s.to_dict() for s in sorted(sessions.values(), key=lambda s: s.entry_time)],
             "passes": [p.to_dict() for p in sorted(passes.values(), key=lambda p: p.created_at)],
+            "expenses": [e.to_dict() for e in sorted(expenses.values(), key=lambda e: e.created_at)],
         }
         text = json.dumps(payload, ensure_ascii=False, indent=2) + "\n"
         tmp_path: str | None = None

@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex">
+  <title>Expenses · On Top Gaming</title>
+  <link rel="stylesheet" href="/css/app.css">
+  <script type="module" src="/js/expenses.js"></script>
+</head>
+<body class="loading">
+  <header class="topbar">
+    <div class="brand"><span class="logo">▲</span> On Top Gaming</div>
+    <nav aria-label="Pages">
+      <a href="/">Dashboard</a>
+      <a href="/mapping">Session Mapping</a>
+      <a href="/expenses" aria-current="page">Expenses</a>
+    </nav>
+    <div id="sync-status" class="sync" role="status"></div>
+    <div class="user"><span id="user-name"></span><button id="logout" class="ghost" type="button">Sign out</button></div>
+  </header>
+  <div id="stale-banner" class="banner" role="alert" hidden></div>
+
+  <main>
+    <div class="page-head">
+      <div>
+        <h1>Employee expenses</h1>
+        <div class="muted small">Money employees spent for the café, as entered in the desktop app's Expenses tab.
+          This page is read-only; add or correct expenses on the café PC.</div>
+      </div>
+    </div>
+
+    <form id="filters" class="filters card" autocomplete="off">
+      <label>Date range
+        <select name="period">
+          <option value="today">Today</option>
+          <option value="yesterday">Yesterday</option>
+          <option value="7d">Last 7 days</option>
+          <option value="week">This week</option>
+          <option value="month" selected>This month</option>
+          <option value="year">This year</option>
+          <option value="all">All time</option>
+          <option value="30d">Last 30 days</option>
+          <option value="last-month">Last month</option>
+          <option value="custom">Custom dates</option>
+        </select>
+      </label>
+      <label>From <input type="date" name="from"></label>
+      <label>To <input type="date" name="to"></label>
+      <label>Note <input type="search" name="q" placeholder="Search notes" maxlength="80"></label>
+      <button type="button" id="reset-filters" class="ghost">Reset</button>
+      <p class="muted small note">Expenses are dated by the day they were entered (IST), including both the From and To days.</p>
+    </form>
+
+    <p id="page-error" class="banner error" role="alert" hidden></p>
+
+    <p id="range-label" class="muted small range-label"></p>
+    <section class="stats" id="stats" aria-label="Totals"></section>
+
+    <section class="card">
+      <h2>Expenses</h2>
+      <div class="table-wrap">
+        <table id="expenses">
+          <thead>
+            <tr>
+              <th data-sort="date">Entered</th>
+              <th data-sort="amount" class="num">Amount</th>
+              <th data-sort="note">Note</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <div class="pager">
+        <span id="page-info" class="muted small"></span>
+        <div class="buttons">
+          <label class="muted small">Rows
+            <select id="page-size"><option>25</option><option>50</option><option>100</option></select>
+          </label>
+          <button type="button" id="prev-page">Previous</button>
+          <button type="button" id="next-page">Next</button>
+        </div>
+      </div>
+    </section>
+
+    <div class="footer-note"><span id="updated-at"></span><button type="button" id="refresh" class="ghost">Refresh now</button></div>
+  </main>
+</body>
+</html>

@@ -15,3 +15,7 @@ sync_config.json
 cafe-web/.dev.vars
 cafe-web/.wrangler/
 cafe-web/node_modules/
+
+# Packaged .exe build output (tools/build_exe.ps1).
+build/
+dist/

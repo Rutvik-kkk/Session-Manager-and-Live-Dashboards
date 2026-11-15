@@ -20,7 +20,7 @@ from ..formatting import (
     now_local,
     to_local,
 )
-from ..models import DEVICES, PAYMENT_STATUSES, Session, fmt_phone
+from ..models import DEVICES, PAYMENT_STATUSES, Session, fmt_items, fmt_phone
 from . import theme
 from .widgets import DateEntry
 
@@ -79,6 +79,8 @@ class SessionDetailsDialog(tk.Toplevel):
             ("Device", session.device),
             ("Players", str(session.players)),
         ]
+        if session.game:
+            rows.append(("Game", session.game))
         p = app.store.get_pass(session.pass_id)
         if p:
             left = p.included_minutes - app.store.pass_used_minutes(p.id)
@@ -89,6 +91,10 @@ class SessionDetailsDialog(tk.Toplevel):
             ("End", fmt_datetime_long(session.end)),
             ("Duration", fmt_duration(session.duration_minutes)),
             ("Payment method", session.payment_method),
+        ]
+        if session.items:
+            rows.append(("Snacks & drinks", f"{fmt_items(session.items)} · {fmt_money(session.items_paise)}"))
+        rows += [
             ("Total charge", fmt_money(session.total_paise)),
             ("Amount paid", fmt_money(session.paid_paise)),
             ("Balance due", fmt_money(session.balance_paise)),

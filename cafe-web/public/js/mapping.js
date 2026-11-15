@@ -19,6 +19,34 @@ document.getElementById("prev-day").addEventListener("click", () => setDay(addDa
 document.getElementById("next-day").addEventListener("click", () => setDay(addDays(day, 1)));
 document.getElementById("today").addEventListener("click", () => setDay(todayIST()));
 
+const itemsTotal = (s) => s.items.reduce((a, i) => a + i.quantity * i.unit_paise, 0);
+const itemLine = (i) => `${i.quantity}× ${i.name} (${i.kind}) · ${fmtMoney(i.quantity * i.unit_paise)}`;
+let selectedId = null;
+
+/** Fill the details card for the tapped booking (customer names are only ever set as text). */
+function showDetails(s) {
+  const list = document.getElementById("details-list");
+  document.getElementById("details-empty").hidden = Boolean(s);
+  list.hidden = !s;
+  if (!s) {
+    list.replaceChildren();
+    return;
+  }
+  const row = (label, ...value) => [el("dt", { text: label }), el("dd", {}, ...value)];
+  list.replaceChildren(
+    ...row("Customer", s.customer_name, s.on_pass ? el("span", { class: "badge", text: "Pass" }) : null),
+    ...row("Device", s.device),
+    ...row("Time", `${fmtTime(s.start_ms)}–${fmtTime(s.end_ms)} (${fmtDuration(s.duration_minutes)})`),
+    ...row("Players", String(s.players)),
+    ...row("Game", s.game || "—"),
+    ...row("Snacks & drinks", s.items.length
+      ? el("ul", {}, ...s.items.map((i) => el("li", { text: itemLine(i) })))
+      : "—"),
+    ...row("Charged", fmtMoney(s.total_paise)),
+    ...row("Paid", `${fmtMoney(s.paid_paise)} · ${s.payment_status} (${s.payment_method})`),
+  );
+}
+
 const toMinutes = (hhmm) => Number(hhmm.slice(0, 2)) * 60 + Number(hhmm.slice(3, 5));
 
 function stat(label, value, sub) {
@@ -42,7 +70,10 @@ function render(data) {
     stat("Charged", fmtMoney(sessions.reduce((a, s) => a + s.total_paise, 0))),
     stat("Collected", fmtMoney(sessions.reduce((a, s) => a + s.paid_paise, 0))),
     stat("Device time used", `${Math.round((100 * minutes) / capacity)}%`, `${fmtDuration(minutes)} booked`),
+    stat("Snacks & drinks", fmtMoney(sessions.reduce((a, s) => a + itemsTotal(s), 0)),
+      `${sessions.reduce((a, s) => a + s.items.reduce((n, i) => n + i.quantity, 0), 0)} items sold`),
   );
+  showDetails(selectedId ? sessions.find((s) => s.id === selectedId) : null);
 
   // Widen the window if a session falls outside opening hours.
   let start = open, end = close;
@@ -68,13 +99,30 @@ function render(data) {
     for (const s of sessions.filter((x) => x.device === device)) {
       const from = istMinutes(s.start_ms);
       const block = el("div", {
-        class: `block ${s.payment_status.split(" ")[0]}`,
+        class: `block ${s.payment_status.split(" ")[0]}${s.id === selectedId ? " selected" : ""}`,
+        tabindex: "0",
+        role: "button",
         title: `${s.customer_name} · ${fmtTime(s.start_ms)}–${fmtTime(s.end_ms)} (${fmtDuration(s.duration_minutes)})\n` +
           `${s.players} player${s.players === 1 ? "" : "s"}${s.on_pass ? " · monthly pass" : ""}\n` +
+          (s.game ? `Game: ${s.game}\n` : "") +
+          (s.items.length ? `${s.items.map(itemLine).join("\n")}\n` : "") +
           `${fmtMoney(s.total_paise)} · ${s.payment_status} (${s.payment_method})`,
       },
       el("strong", { text: s.customer_name }),
       el("span", { text: `${fmtTime(s.start_ms)}–${fmtTime(s.end_ms)}` }));
+      const select = () => {
+        selectedId = s.id;
+        for (const other of document.querySelectorAll(".block.selected")) other.classList.remove("selected");
+        block.classList.add("selected");
+        showDetails(s);
+      };
+      block.addEventListener("click", select);
+      block.addEventListener("keydown", (event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          select();
+        }
+      });
       block.style.left = pct(from);
       block.style.width = `calc(${((100 * s.duration_minutes) / span).toFixed(3)}% - 2px)`;
       track.append(block);

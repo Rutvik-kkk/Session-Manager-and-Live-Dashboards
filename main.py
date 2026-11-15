@@ -3,8 +3,9 @@
 Usage:
     python main.py                  # data stored in ./data/sessions.json
     python main.py --data-dir PATH  # use a different data folder (e.g. for training)
+    OnTopGaming.exe                 # packaged build: data\ and sync_config.json sit next to the .exe
 
-Online dashboard sync is enabled by sync_config.json next to this file
+Online dashboard sync is enabled by sync_config.json next to this file (or next to the .exe)
 (see sync_config.example.json and cafe-web/README.md).
 """
 
@@ -18,7 +19,9 @@ import tkinter as tk
 from pathlib import Path
 from tkinter import messagebox
 
-APP_DIR = Path(__file__).resolve().parent
+# Beside main.py when run from source; beside the .exe when packaged (data/ and sync_config.json live there).
+FROZEN = getattr(sys, "frozen", False)
+APP_DIR = Path(sys.executable).resolve().parent if FROZEN else Path(__file__).resolve().parent
 
 
 def enable_sharp_rendering() -> None:
@@ -92,8 +95,13 @@ def main(argv: list[str] | None = None) -> int:
         lock.release()
     if app is not None and app.restart_requested:
         flags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
-        subprocess.Popen([sys.executable, str(Path(__file__).resolve()), *sys.argv[1:]], cwd=APP_DIR,
-                         creationflags=flags)
+        env = None
+        if FROZEN:  # a one-file .exe must unpack itself afresh rather than reuse this run's temporary folder
+            command = [sys.executable, *sys.argv[1:]]
+            env = {**os.environ, "PYINSTALLER_RESET_ENVIRONMENT": "1"}
+        else:
+            command = [sys.executable, str(Path(__file__).resolve()), *sys.argv[1:]]
+        subprocess.Popen(command, cwd=APP_DIR, creationflags=flags, env=env)
     return 0
 
 

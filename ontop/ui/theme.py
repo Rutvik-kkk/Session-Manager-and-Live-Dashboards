@@ -11,6 +11,7 @@ import tkinter as tk
 from tkinter import font as tkfont
 from tkinter import ttk
 
+from .. import config
 from ..models import STATUS_PAID, STATUS_PARTIAL, STATUS_UNPAID
 
 _MIDNIGHT = {
@@ -83,6 +84,7 @@ ROW_ALT = GRID_MINOR = NOW_LINE = BAR_TEXT = BANNER_BG = BANNER_FG = ""
 DANGER_BG = DANGER_ACTIVE = DANGER_FG = DANGER_BORDER = DEVICE_1 = DEVICE_2 = DEVICE_3 = ""
 STATUS_COLORS: dict[str, str] = {}
 DEVICE_COLORS: dict[str, str] = {}
+KIND_COLORS: dict[str, str] = {}  # snack / drink
 
 
 def set_palette(name: str) -> None:
@@ -93,7 +95,10 @@ def set_palette(name: str) -> None:
     STATUS_COLORS.clear()
     STATUS_COLORS.update({STATUS_PAID: SUCCESS, STATUS_UNPAID: DANGER, STATUS_PARTIAL: WARNING})
     DEVICE_COLORS.clear()
-    DEVICE_COLORS.update({"PS5(X)": DEVICE_1, "PS5(Y)": DEVICE_2, "PS4": DEVICE_3})
+    spare = [DEVICE_1, DEVICE_2, DEVICE_3, WARNING, SUCCESS, INFO, DANGER]  # one colour per device, then repeat
+    DEVICE_COLORS.update({name: spare[i % len(spare)] for i, name in enumerate(config.DEVICES)})
+    KIND_COLORS.clear()
+    KIND_COLORS.update({config.ITEM_SNACK: WARNING, config.ITEM_DRINK: INFO})
 
 
 set_palette("Midnight")

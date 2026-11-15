@@ -1,5 +1,5 @@
 import { handleLogin, handleLogout, handleMe, requireSession } from "./auth";
-import { handleDashboard, handleMapping, handleSessions, handleStatus } from "./dashboard";
+import { handleDashboard, handleExpenses, handleMapping, handleSessions, handleStatus } from "./dashboard";
 import { handleSync } from "./sync";
 import { AppEnv, HttpError, json } from "./util";
 
@@ -20,6 +20,7 @@ const ROUTES: Record<string, Partial<Record<string, Handler>>> = {
   "/api/dashboard": { GET: authed(handleDashboard) },
   "/api/sessions": { GET: authed(handleSessions) },
   "/api/mapping": { GET: authed(handleMapping) },
+  "/api/expenses": { GET: authed(handleExpenses) },
 };
 
 export default {
